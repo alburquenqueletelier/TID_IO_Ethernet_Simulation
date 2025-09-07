@@ -45,4 +45,4 @@ sock.bind((SOURCE_INTERFACE, 0))
 
 # Enviar
 sock.send(frame)
-print("✅ Frame sent via", SOURCE_INTERFACE)
+print("Frame sent via", SOURCE_INTERFACE)

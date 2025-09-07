@@ -12,9 +12,10 @@ iface = DESTINATION_INTERFACE
 
 sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
 sock.bind((iface, 0))
+bufer_size = 65535
 
 while True:
-    raw_data, addr = sock.recvfrom(65535)
+    raw_data, addr = sock.recvfrom(bufer_size) #usar una var+ verbose
 
     dst_mac = raw_data[0:6].hex(":")
     src_mac = raw_data[6:12].hex(":")

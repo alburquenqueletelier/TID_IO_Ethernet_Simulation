@@ -12,8 +12,8 @@ Este proyecto simula el envío y recepción de tramas de datos entre dispositivo
 2. Crea un ambiente virtual (o no)
 
 ```bash
-python3 -m venv .env # o el nombre que quieras
-source .env/bin/activate
+python3 -m venv .venv # o el nombre que quieras
+source .venv/bin/activate
 ```
 
 3. Instala las dependencias ejecutando:
@@ -27,17 +27,23 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+**Nota:** para ver el nombre y mac de tus interfaces usa `ip a` en linux. Recuerda tener conectada tu computadora con un cable ethernet a sí misma.
+
 ## Uso
-El archivo principal es `simulation.py`. Para ejecutar la simulación:
+1. Ejecuta `destination.py` para monitorear el tráfico de la interfaz ethernet de destino
+    ```bash
+    sudo $(which python) destination.py
+    ```
+2. Abre otra terminal y ejecuta `source.py` para enviar una trama
+    ```bash
+    sudo $(which python) source.py
+    ```
 
-```bash
-sudo $(which python) simulation.py
-```
-Esto construirá y mostrará una trama de datos simulada usando Scapy.
-
-**NOTA:** Scapy requiere privilegios root ya que interactua con raw socket a nivel de capa 2, el cual se logra mediante procesos reservados para el OS (systems calls). El `$(which python)` se usa para que sudo utilice el entorno virtual en lugar del global.
+**NOTA:** La librería socket de python requiere de privilegios root para algunas características. El `$(which python)` se usa para que sudo utilice el entorno virtual en lugar del global.
 
 ## Visualización 
+Adicional a los registros visibles en la terminal donde corre `destination.py` puedes usar `Wireshark` para monitorear las tramas enviadas o recibidas según la interfaz de red que sniffeas. 
+
 1. Abre Wireshark con privilegios de admin
 `sudo wireshark`
 
@@ -46,7 +52,8 @@ Esto construirá y mostrará una trama de datos simulada usando Scapy.
 
 
 ## Estructura del proyecto
-- `simulation.py`: Script principal de simulación.
+- `source.py`: Script que envía tramas desde la interfaz origen a la de destino.
+- `destination.py`: Script que recibe tramas en bruto, las parsea e imprime en consola.
 - `requirements.txt`: Dependencias del proyecto.
 - `docs/`: Documentación y recursos gráficos.
 

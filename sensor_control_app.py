@@ -1,13 +1,11 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import sqlite3
-import serial
+import psutil
 import json
-import threading
-import time
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from datetime import datetime 
+# import matplotlib.pyplot as plt
+# from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import defaultdict, deque
 import queue
 
@@ -43,12 +41,15 @@ appendix_dict = {
 }
 
 
-class SensorControlApp:
+class McControlApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Control de Microcontroladores y Sensores")
+        self.root.title("Control de Microcontroladores y Micro Controladores")
         self.root.geometry("1200x800")
         self.root.configure(bg="#f0f0f0")
+
+        # Comandos
+        self.commands = appendix_dict
 
         # Variables de estado
         self.admin_in = False
@@ -57,6 +58,7 @@ class SensorControlApp:
         self.running = False
 
         # Contadores y estadísticas
+        self.mc_available = {}
         self.frames_sent = 0
         self.frames_received = 0
         self.sensor_data = deque(maxlen=1000)  # Últimos 1000 registros
@@ -73,7 +75,7 @@ class SensorControlApp:
         self.conn = sqlite3.connect("sensor_data.db", check_same_thread=False)
         cursor = self.conn.cursor()
 
-        # Tabla para datos de sensores
+        # Tabla para datos de Micro Controladores
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS sensor_readings (
@@ -111,7 +113,7 @@ class SensorControlApp:
         # Título
         title_label = tk.Label(
             self.login_frame,
-            text="Sistema de Control de Sensores",
+            text="Sistema de Control de Micro Controladores",
             font=("Arial", 16, "bold"),
             fg="white",
             bg="#2c3e50",
@@ -168,9 +170,6 @@ class SensorControlApp:
         # Pestañas
         self.create_dashboard_tab()
         self.create_commands_tab()
-        # self.create_metadata_tab()
-        # self.create_traffic_tab()
-        # self.create_database_tab()
 
         # Barra de estado
         self.status_bar = tk.Label(
@@ -187,19 +186,19 @@ class SensorControlApp:
         self.notebook.add(dashboard_frame, text="Dashboard")
 
         ###
-        # Frame superior para Gestionar Sensores
+        # Frame superior para Gestionar Micro Controladores
         stats_frame = tk.LabelFrame(
-            dashboard_frame, text="Centro de Sensores", font=("Arial", 12, "bold")
+            dashboard_frame, text="Centro de Micro Controladores", font=("Arial", 12, "bold")
         )
         stats_frame.pack(fill="x", padx=10, pady=5)
 
-        # Crear grid para gestor de sensores
+        # Crear grid para gestor de Micro Controladores
         stats_grid = tk.Frame(stats_frame)
         stats_grid.pack(fill="x", padx=10, pady=10)
 
         # Tramas enviadas
         tk.Label(
-            stats_grid, text="Sensores Registrados", font=("Arial", 10, "bold")
+            stats_grid, text="Micro Controladores Conectados", font=("Arial", 10, "bold")
         ).grid(row=0, column=0, sticky="w")
         self.frames_sent_label = tk.Label(stats_grid, text="0", font=("Arial", 10))
         self.frames_sent_label.grid(row=0, column=1, padx=20)
@@ -220,14 +219,14 @@ class SensorControlApp:
         tk.Label(stats_grid, text="Tramas Enviadas:", font=("Arial", 10, "bold")).grid(
             row=0, column=0, sticky="w"
         )
-        self.frames_sent_label = tk.Label(stats_grid, text="0", font=("Arial", 10))
+        self.frames_sent_label = tk.Label(stats_grid, text=f"{self.frames_sent}", font=("Arial", 10))
         self.frames_sent_label.grid(row=0, column=1, padx=20)
 
         # Tramas recibidas
         tk.Label(stats_grid, text="Tramas Recibidas:", font=("Arial", 10, "bold")).grid(
             row=0, column=2, sticky="w"
         )
-        self.frames_received_label = tk.Label(stats_grid, text="0", font=("Arial", 10))
+        self.frames_received_label = tk.Label(stats_grid, text=f"{self.frames_received}", font=("Arial", 10))
         self.frames_received_label.grid(row=0, column=3, padx=20)
 
         # Evento más común
@@ -255,146 +254,72 @@ class SensorControlApp:
         events_scrollbar.config(command=self.events_listbox.yview)
 
     def create_commands_tab(self):
-        """Crea la pestaña de comandos"""
-        commands_frame = ttk.Frame(self.notebook)
-        self.notebook.add(commands_frame, text="Comandos")
+        """Crea la pestaña de comandos con scroll"""
+        # Frame principal de la pestaña
+        commands_tab = ttk.Frame(self.notebook)
+        self.notebook.add(commands_tab, text="Comandos")
 
-        # Frame de selección de sensores
-        sensor_selection_frame = tk.LabelFrame(
-            commands_frame, text="Seleccionar Sensores"
+        # Detecta y carga las interfaces ethernet
+        self.refresh_sensors_list()
+        
+        # Canvas con scrollbar
+        canvas = tk.Canvas(commands_tab, borderwidth=0, highlightthickness=0)
+        scrollbar = tk.Scrollbar(commands_tab, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        sensor_selection_frame.pack(fill="both", expand=True, padx=10, pady=5)
-
-        # Container para los dos listados
-        listboxes_container = tk.Frame(sensor_selection_frame)
-        listboxes_container.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # Frame izquierdo - Sensores disponibles
-        left_frame = tk.Frame(listboxes_container)
-        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
-
-        tk.Label(
-            left_frame, text="Sensores Disponibles", font=("Arial", 10, "bold")
-        ).pack()
-
-        # Listbox de sensores disponibles
-        self.available_sensors_listbox = tk.Listbox(
-            left_frame, selectmode=tk.SINGLE, height=12
-        )
-        self.available_sensors_listbox.pack(fill="both", expand=True, pady=(5, 0))
-        self.available_sensors_listbox.bind("<Double-Button-1>", self.move_to_selected)
-
-        # Scrollbar para sensores disponibles
-        available_scrollbar = tk.Scrollbar(left_frame, orient="vertical")
-        available_scrollbar.pack(side="right", fill="y")
-        self.available_sensors_listbox.config(yscrollcommand=available_scrollbar.set)
-        available_scrollbar.config(command=self.available_sensors_listbox.yview)
-
-        # Frame central - Botones de control
-        control_frame = tk.Frame(listboxes_container, width=80)
-        control_frame.pack(side="left", fill="y", padx=5)
-        control_frame.pack_propagate(False)  # Mantener ancho fijo
-
-        # Espaciador superior
-        tk.Label(control_frame, text="").pack(pady=10)
-
-        # Botón agregar seleccionado
-        add_btn = tk.Button(
-            control_frame,
-            text="▶",
-            font=("Arial", 12, "bold"),
-            command=self.move_to_selected,
-            width=6,
-            height=1,
-        )
-        add_btn.pack(pady=5)
-
-        # Botón quitar seleccionado
-        remove_btn = tk.Button(
-            control_frame,
-            text="◀",
-            font=("Arial", 12, "bold"),
-            command=self.move_to_available,
-            width=6,
-            height=1,
-        )
-        remove_btn.pack(pady=5)
-
-        # Separador
-        tk.Label(control_frame, text="─────", fg="gray").pack(pady=10)
-
-        # Botón seleccionar todos
-        select_all_btn = tk.Button(
-            control_frame,
-            text="▶▶",
-            font=("Arial", 10, "bold"),
-            command=self.select_all_sensors,
-            width=6,
-            height=1,
-        )
-        select_all_btn.pack(pady=2)
-
-        # Botón deseleccionar todos
-        deselect_all_btn = tk.Button(
-            control_frame,
-            text="◀◀",
-            font=("Arial", 10, "bold"),
-            command=self.deselect_all_sensors,
-            width=6,
-            height=1,
-        )
-        deselect_all_btn.pack(pady=2)
-
-        # Frame derecho - Sensores seleccionados
-        right_frame = tk.Frame(listboxes_container)
-        right_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
-
-        tk.Label(
-            right_frame, text="Sensores Seleccionados", font=("Arial", 10, "bold")
-        ).pack()
-
-        # Listbox de sensores seleccionados
-        self.selected_sensors_listbox = tk.Listbox(
-            right_frame, selectmode=tk.SINGLE, height=12
-        )
-        self.selected_sensors_listbox.pack(fill="both", expand=True, pady=(5, 0))
-        self.selected_sensors_listbox.bind("<Double-Button-1>", self.move_to_available)
-
-        # Scrollbar para sensores seleccionados
-        selected_scrollbar = tk.Scrollbar(right_frame, orient="vertical")
-        selected_scrollbar.pack(side="right", fill="y")
-        self.selected_sensors_listbox.config(yscrollcommand=selected_scrollbar.set)
-        selected_scrollbar.config(command=self.selected_sensors_listbox.yview)
-
-        # Frame de información de selección
-        info_frame = tk.Frame(sensor_selection_frame)
-        info_frame.pack(fill="x", padx=5, pady=(5, 0))
-
-        self.selection_info_label = tk.Label(
-            info_frame, text="0 sensores seleccionados", font=("Arial", 9), fg="gray"
-        )
-        self.selection_info_label.pack(side="left")
-
-        refresh_sensors_btn = tk.Button(
-            info_frame, text="🔄 Actualizar Lista", command=self.refresh_sensors_list
-        )
-        refresh_sensors_btn.pack(side="right")
-
+        
+        canvas.bind('<Configure>', lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")  # <-- GUARDA LA REFERENCIA
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Scroll con rueda del mouse
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
         # Formulario
-        available_commands_frame = tk.LabelFrame(
-            commands_frame, text="Formulario para enviar comandos"
+        available_scrollable_frame = tk.LabelFrame(
+            scrollable_frame, text="Formulario para enviar comandos"
         )
-        available_commands_frame.pack(fill="x", padx=10, pady=5)
+        available_scrollable_frame.pack(fill="x", padx=10, pady=5)
 
-        # Lista de comandos predefinidos
-        self.commands = appendix_dict
-
-        form_frame = tk.LabelFrame(commands_frame, text="Formulario")
+        form_frame = tk.LabelFrame(scrollable_frame, text="Formulario")
         form_frame.pack(fill="x", padx=10, pady=5)
 
         # Container principal del formulario
         form_container = tk.Frame(form_frame)
         form_container.pack(fill="x", padx=10, pady=10)
+
+        # Fila 0: select de micro controlador
+        mc_row = tk.Frame(form_container)
+        mc_row.pack(fill="x", pady=5)
+
+        tk.Label(
+            mc_row,
+            text="Micro Controlador:",
+            font=("Arial", 10, "bold"),
+            width=20,
+            anchor="w",
+        ).pack(side="left")
+        self.mc_var = tk.StringVar()
+        mc_combo = ttk.Combobox(
+            mc_row,
+            textvariable=self.mc_var,
+            values=list(self.mc_available.keys()),
+            state="readonly",
+            width=30,
+        )
+        mc_combo.pack(side="left", padx=(10, 0))
+        mc_combo.set("Seleccione un comando...")  # Valor por defecto
 
         # Fila 1: Select de comando
         command_row = tk.Frame(form_container)
@@ -498,24 +423,24 @@ class SensorControlApp:
         )
         send_form_btn.pack()
 
-        # Información adicional
-        info_row = tk.Frame(form_container)
-        info_row.pack(fill="x", pady=(10, 0))
+        # # Información adicional
+        # info_row = tk.Frame(form_container)
+        # info_row.pack(fill="x", pady=(10, 0))
 
-        info_text = "💡 Seleccione sensores arriba, configure el comando y ejecute"
-        tk.Label(
-            info_row, text=info_text, fg="gray", font=("Arial", 9, "italic")
-        ).pack()
+        # info_text = "💡 Seleccione Micro Controladores arriba, configure el comando y ejecute"
+        # tk.Label(
+        #     info_row, text=info_text, fg="gray", font=("Arial", 9, "italic")
+        # ).pack()
 
         # Frame de respuestas del sistema
-        response_frame = tk.LabelFrame(commands_frame, text="Respuestas del Sistema")
+        response_frame = tk.LabelFrame(scrollable_frame, text="Respuestas del Sistema")
         response_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         self.response_text = scrolledtext.ScrolledText(response_frame, height=8)
         self.response_text.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Cargar sensores iniciales
-        self.refresh_sensors_list()
+        # Cargar Micro Controladores iniciales
+        # self.refresh_sensors_list()
 
     def process_command_form(self):
         """
@@ -523,27 +448,26 @@ class SensorControlApp:
 
         Esta función debe ser implementada para:
         1. Validar los datos del formulario
-        2. Obtener los sensores seleccionados
+        2. Obtener los Micro Controladores seleccionados
         3. Ejecutar el comando según los parámetros especificados
         4. Mostrar progreso/resultados al usuario
         """
-        # TODO: Implementar procesamiento del formulario
 
         # Obtener datos del formulario
+        selected_mc = self.mc_var.get()
         selected_command = self.command_var.get()
         num_executions = self.executions_var.get()
         time_interval = self.interval_var.get()
-        selected_sensors = self.get_selected_sensors()
 
         # Validaciones
         if not selected_command or selected_command == "Seleccione un comando...":
             messagebox.showwarning("Validación", "Debe seleccionar un tipo de comando")
             return
 
-        if not selected_sensors:
+        if not selected_mc:
             if not messagebox.askyesno(
-                "Sin Sensores",
-                "No hay sensores seleccionados. ¿Continuar con comando general?",
+                "Sin Micro Controladores",
+                "No hay Micro Controladores seleccionados. ¿Continuar con comando general?",
             ):
                 return
 
@@ -566,20 +490,19 @@ class SensorControlApp:
         info_message = f"""
     Comando a ejecutar: {selected_command}
     Valor del comando: {command_value}
-    Sensores objetivo: {', '.join(selected_sensors) if selected_sensors else 'Comando general'}
+    Micro Controladores objetivo: {', '.join(selected_mc) if selected_mc else 'Comando general'}
     Número de ejecuciones: {num_executions}
     Intervalo entre ejecuciones: {time_interval} segundos
     Tiempo total estimado: {num_executions * time_interval:.1f} segundos
         """.strip()
 
         if messagebox.askyesno("Confirmar Ejecución", info_message):
-            # TODO: Aquí implementar la lógica de ejecución del comando
             # Ejemplo de estructura:
             """
             try:
                 self.execute_command_sequence(
                     command_value=command_value,
-                    target_sensors=selected_sensors,
+                    target_mc=selected_mc,
                     executions=num_executions,
                     interval=time_interval
                 )
@@ -587,181 +510,66 @@ class SensorControlApp:
                 messagebox.showerror("Error", f"Error ejecutando comando: {str(e)}")
             """
 
-            # Por ahora, solo mostrar en el área de respuestas y imprimir en consola
+            # Mstrar en el área de respuestas y imprimir en consola
             titulo = "FORMULARIO PROCESADO:\n"
             comando_enviado = f"Comando: {selected_command} valor: ({command_value})"
-            interfaz_usada = f"Harcodeado: enp0s8"
-            sensor_receptor = f"Sensores: {selected_sensors}"
+            interfaz_usada = f"{self.mc_available.get(selected_mc)}"
+            mc_receptor = f"Micro Controladores: {selected_mc}"
             n_ejecuciones_y_interv = f"Ejecuciones: {num_executions}, Intervalo: {time_interval}s"
             print(titulo)
             print(comando_enviado)
             print(interfaz_usada)
-            print(sensor_receptor)
+            print(mc_receptor)
             print(n_ejecuciones_y_interv)
 
+            ## Mostrar Salida en "Respuestas del sistema"
+            #TODO agregar salida de eventos en dashboard
             self.add_response(f"FORMULARIO PROCESADO:")
             self.add_response(f"Comando: {selected_command} ({command_value})")
-            self.add_response(f"Sensores: {selected_sensors}")
+            self.add_response(f"Micro Controladores: {selected_mc}")
             self.add_response(
                 f"Ejecuciones: {num_executions}, Intervalo: {time_interval}s"
             )
             self.add_response("─" * 50)
 
     def refresh_sensors_list(self):
-        """Actualiza la lista de sensores disponibles desde la base de datos"""
-        try:
-            # Limpiar listbox de disponibles
-            self.available_sensors_listbox.delete(0, tk.END)
-
-            cursor = self.conn.cursor()
-            cursor.execute(
-                """
-                SELECT DISTINCT sensor_id, sensor_type 
-                FROM sensor_readings 
-                ORDER BY sensor_type, sensor_id
-            """
-            )
-
-            sensors_from_db = cursor.fetchall()
-
-            # Si no hay sensores en la BD, agregar algunos de ejemplo
-            if not sensors_from_db:
-                example_sensors = [
-                    ("TEMP_001", "temperature"),
-                    ("TEMP_002", "temperature"),
-                    ("GAMMA_001", "gamma"),
-                    ("GAMMA_002", "gamma"),
-                    ("PET_001", "pet_scanner"),
-                    ("PRESSURE_001", "pressure"),
-                    ("HUMIDITY_001", "humidity"),
-                ]
-
-                # Agregar sensores de ejemplo a la lista
-                for sensor_id, sensor_type in example_sensors:
-                    display_text = f"{sensor_id} ({sensor_type.upper()})"
-                    self.available_sensors_listbox.insert(tk.END, display_text)
-            else:
-                # Agregar sensores reales de la BD
-                for sensor_id, sensor_type in sensors_from_db:
-                    display_text = f"{sensor_id} ({sensor_type.upper()})"
-                    # Solo agregar si no está ya en la lista de seleccionados
-                    if not self._is_sensor_selected(display_text):
-                        self.available_sensors_listbox.insert(tk.END, display_text)
-
-            self.update_selection_info()
-
-        except Exception as e:
-            print(f"Error actualizando lista de sensores: {e}")
-            # En caso de error, mostrar sensores de ejemplo
-            example_sensors = [
-                "TEMP_001 (TEMPERATURE)",
-                "TEMP_002 (TEMPERATURE)",
-                "GAMMA_001 (GAMMA)",
-                "PET_001 (PET_SCANNER)",
-            ]
-
-            self.available_sensors_listbox.delete(0, tk.END)
-            for sensor in example_sensors:
-                self.available_sensors_listbox.insert(tk.END, sensor)
-
-    def _is_sensor_selected(self, sensor_text):
-        """Verifica si un sensor ya está en la lista de seleccionados"""
-        selected_items = self.selected_sensors_listbox.get(0, tk.END)
-        return sensor_text in selected_items
-
-    def move_to_selected(self, event=None):
-        """Mueve el sensor seleccionado a la lista de seleccionados"""
-        try:
-            selection = self.available_sensors_listbox.curselection()
-            if selection:
-                index = selection[0]
-                sensor_text = self.available_sensors_listbox.get(index)
-
-                # Agregar a seleccionados
-                self.selected_sensors_listbox.insert(tk.END, sensor_text)
-
-                # Quitar de disponibles
-                self.available_sensors_listbox.delete(index)
-
-                self.update_selection_info()
-
-        except Exception as e:
-            print(f"Error moviendo sensor a seleccionados: {e}")
-
-    def move_to_available(self, event=None):
-        """Mueve el sensor seleccionado de vuelta a la lista de disponibles"""
-        try:
-            selection = self.selected_sensors_listbox.curselection()
-            if selection:
-                index = selection[0]
-                sensor_text = self.selected_sensors_listbox.get(index)
-
-                # Agregar a disponibles
-                self.available_sensors_listbox.insert(tk.END, sensor_text)
-
-                # Quitar de seleccionados
-                self.selected_sensors_listbox.delete(index)
-
-                self.update_selection_info()
-
-        except Exception as e:
-            print(f"Error moviendo sensor a disponibles: {e}")
-
-    def select_all_sensors(self):
-        """Selecciona todos los sensores disponibles"""
-        try:
-            # Mover todos los sensores de disponibles a seleccionados
-            items = list(self.available_sensors_listbox.get(0, tk.END))
-
-            for item in items:
-                self.selected_sensors_listbox.insert(tk.END, item)
-
-            # Limpiar lista de disponibles
-            self.available_sensors_listbox.delete(0, tk.END)
-
-            self.update_selection_info()
-
-        except Exception as e:
-            print(f"Error seleccionando todos los sensores: {e}")
-
-    def deselect_all_sensors(self):
-        """Deselecciona todos los sensores"""
-        try:
-            # Mover todos los sensores de seleccionados a disponibles
-            items = list(self.selected_sensors_listbox.get(0, tk.END))
-
-            for item in items:
-                self.available_sensors_listbox.insert(tk.END, item)
-
-            # Limpiar lista de seleccionados
-            self.selected_sensors_listbox.delete(0, tk.END)
-
-            self.update_selection_info()
-
-        except Exception as e:
-            print(f"Error deseleccionando todos los sensores: {e}")
-
-    def update_selection_info(self):
-        """Actualiza la información de sensores seleccionados"""
-        selected_count = self.selected_sensors_listbox.size()
-        available_count = self.available_sensors_listbox.size()
-        total_count = selected_count + available_count
-
-        info_text = f"{selected_count} de {total_count} sensores seleccionados"
-        self.selection_info_label.config(text=info_text)
-
-    def get_selected_sensors(self):
-        """Retorna la lista de sensores seleccionados"""
-        selected_sensors = []
-        for i in range(self.selected_sensors_listbox.size()):
-            sensor_text = self.selected_sensors_listbox.get(i)
-            # Extraer ID del sensor del texto formato "SENSOR_ID (TYPE)"
-            sensor_id = (
-                sensor_text.split(" (")[0] if " (" in sensor_text else sensor_text
-            )
-            selected_sensors.append(sensor_id)
-        return selected_sensors
-
+        """Actualiza la lista de interfaces ethernet conectadas y sus MACs"""
+        
+        # Limpiar datos previos
+        self.mc_available = {}
+        
+        interfaces = psutil.net_if_addrs()
+        stats = psutil.net_if_stats()
+        
+        for iface_name, addrs in interfaces.items():
+            # Filtros básicos
+            if iface_name == 'lo':  # Loopback
+                continue
+            if any(iface_name.startswith(prefix) for prefix in ['vir', 'docker', 'br-', 'veth', 'vmnet', 'vboxnet']):
+                continue
+            if 'wl' in iface_name.lower() or 'wifi' in iface_name.lower():  # WiFi
+                continue
+                
+            # Verificar que la interfaz esté UP
+            if iface_name in stats and not stats[iface_name].isup:
+                continue
+            
+            # Buscar MAC
+            mac = None
+            for addr in addrs:
+                if getattr(addr, 'family', None) == psutil.AF_LINK or getattr(addr, 'family', None) == 17:
+                    mac = addr.address
+                    break
+            
+            # Solo agregar si tiene MAC y no es 00:00:00:00:00:00
+            if mac and mac != '00:00:00:00:00:00':
+                self.mc_available[mac] = iface_name
+                display_text = f"{iface_name} (MAC: {mac})"
+        
+        print("Interfaces ethernet detectadas:")
+        for mac, iface in self.mc_available.items():
+            print(f"{iface}: {mac}")
+    
     def create_menu(self):
         """Crea el menú principal"""
         menubar = tk.Menu(self.root)
@@ -784,99 +592,11 @@ class SensorControlApp:
             label="Configurar Puerto", command=print("configurar Puerto")
         )
 
-    def send_command(self, command):
-        """Envía un comando predefinido"""
-        if not self.serial_connection or not self.serial_connection.is_open:
-            messagebox.showwarning(
-                "Sin Conexión", "Debe conectarse al puerto serial primero"
-            )
-            return
-
-        try:
-            command_str = f"{command}\n"
-            self.serial_connection.write(command_str.encode())
-            self.frames_sent += 1
-            self.frames_sent_label.config(text=str(self.frames_sent))
-
-            # Log del comando enviado
-            self.log_communication("SENT", command, "COMMAND")
-            self.add_response(f"Comando enviado: {command}")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al enviar comando: {str(e)}")
-
     def add_response(self, response):
         """Añade una respuesta al área de texto"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.response_text.insert(tk.END, f"[{timestamp}] {response}\n")
         self.response_text.see(tk.END)
-
-    def start_communication_thread(self):
-        """Inicia el hilo de comunicación para recibir datos"""
-        self.running = True
-        self.comm_thread = threading.Thread(target=self.communication_loop, daemon=True)
-        self.comm_thread.start()
-
-        # Actualizar interfaz periódicamente
-        self.root.after(1000, self.update_interface)
-
-    def communication_loop(self):
-        """Bucle principal de comunicación"""
-        while self.running:
-            # Simular recepción de datos (reemplazar con lectura serial real)
-            if self.serial_connection and self.serial_connection.is_open:
-                try:
-                    if self.serial_connection.in_waiting > 0:
-                        data = self.serial_connection.readline().decode().strip()
-                        if data:
-                            self.process_received_data(data)
-                except:
-                    pass
-            else:
-                # Simular datos para pruebas
-                self.simulate_sensor_data()
-
-            time.sleep(1)
-
-    def simulate_sensor_data(self):
-        """Simula datos de sensores para pruebas"""
-        import random
-
-        # Simular datos de temperatura
-        temp_data = {
-            "sensor_id": "TEMP_001",
-            "type": "temperature",
-            "value": round(random.uniform(20.0, 35.0), 2),
-            "unit": "°C",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # Simular datos gamma
-        gamma_data = {
-            "sensor_id": "GAMMA_001",
-            "type": "gamma",
-            "value": round(random.uniform(0.1, 2.5), 3),
-            "unit": "μSv/h",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # Procesar datos simulados
-        for data in [temp_data, gamma_data]:
-            self.data_queue.put(data)
-
-    def process_received_data(self, data):
-        """Procesa los datos recibidos del microcontrolador"""
-        try:
-            # Intentar parsear como JSON
-            sensor_data = json.loads(data)
-            self.data_queue.put(sensor_data)
-
-        except json.JSONDecodeError:
-            # Si no es JSON, tratar como texto plano
-            self.add_response(f"Datos recibidos: {data}")
-
-        self.frames_received += 1
-        self.log_communication("RECEIVED", data, "DATA")
 
     def update_interface(self):
         """Actualiza la interfaz periódicamente"""
@@ -895,42 +615,6 @@ class SensorControlApp:
         # Programar siguiente actualización
         if self.running:
             self.root.after(1000, self.update_interface)
-
-    def apply_traffic_filter(self):
-        """Aplica filtros al tráfico de datos"""
-        filter_type = self.filter_var.get()
-
-        # Limpiar tabla actual
-        for item in self.traffic_tree.get_children():
-            self.traffic_tree.delete(item)
-
-        # Filtrar datos según selección
-        filtered_data = []
-        for data in self.sensor_data:
-            if (
-                filter_type == "Todos"
-                or data.get("type", "").lower() == filter_type.lower()
-            ):
-                filtered_data.append(data)
-
-        # Mostrar datos filtrados
-        for data in filtered_data[-100:]:  # Últimos 100 registros
-            timestamp = data.get("timestamp", "")[:19]  # Solo fecha y hora
-            sensor_id = data.get("sensor_id", "N/A")
-            sensor_type = data.get("type", "N/A").capitalize()
-            value = data.get("value", "N/A")
-            unit = data.get("unit", "")
-            quality = "Buena"  # Simular calidad de datos
-
-            self.traffic_tree.insert(
-                "",
-                "end",
-                values=(timestamp, sensor_id, sensor_type, value, unit, quality),
-            )
-
-    def refresh_traffic_data(self):
-        """Actualiza los datos de tráfico"""
-        self.apply_traffic_filter()
 
     def save_current_data(self):
         """Guarda los datos actuales en la base de datos"""
@@ -1074,27 +758,10 @@ class SensorControlApp:
         except Exception as e:
             print(f"Error actualizando estadísticas: {e}")
 
-    def log_communication(self, direction, data, frame_type):
-        """Registra la comunicación en la base de datos"""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO communication_log (timestamp, direction, data, frame_type)
-                VALUES (?, ?, ?, ?)
-            """,
-                (datetime.now().isoformat(), direction, str(data), frame_type),
-            )
-            self.conn.commit()
-
-        except Exception as e:
-            print(f"Error registrando comunicación: {e}")
-
-
 def main():
     """Función principal para ejecutar la aplicación"""
     root = tk.Tk()
-    app = SensorControlApp(root)
+    app = McControlApp(root)
 
     def on_closing():
         """Maneja el cierre de la aplicación"""

@@ -321,7 +321,22 @@ class McControlApp:
         mc_combo.pack(side="left", padx=(10, 0))
         mc_combo.set("Seleccione un comando...")  # Valor por defecto
 
-        # Fila 1: Select de comando
+        # Fila 1: Input de MAC microcontrolador 
+        destiny_row = tk.Frame(form_container)
+        destiny_row.pack(fill="x", pady=5)
+
+        tk.Label(
+            destiny_row,
+            text="MAC MC Destino:",
+            font=("Arial", 10, "bold"),
+            width=20,
+            anchor="w",
+        ).pack(side="left")
+        self.mac_destino_var = tk.StringVar()
+        mac_destino_entry = tk.Entry(destiny_row, textvariable=self.mac_destino_var, width=30)
+        mac_destino_entry.pack(side="left", padx=(10, 0))
+
+        # Fila 2: Select de comando
         command_row = tk.Frame(form_container)
         command_row.pack(fill="x", pady=5)
 
@@ -343,7 +358,7 @@ class McControlApp:
         command_combo.pack(side="left", padx=(10, 0))
         command_combo.set("Seleccione un comando...")  # Valor por defecto
 
-        # Fila 2: Número de ejecuciones
+        # Fila 3: Número de ejecuciones
         executions_row = tk.Frame(form_container)
         executions_row.pack(fill="x", pady=5)
 
@@ -371,7 +386,7 @@ class McControlApp:
             side="left", padx=(5, 0)
         )
 
-        # Fila 3: Intervalo de tiempo
+        # Fila 4: Intervalo de tiempo
         interval_row = tk.Frame(form_container)
         interval_row.pack(fill="x", pady=5)
 
@@ -401,7 +416,7 @@ class McControlApp:
             interval_row, text="(0.1-3600.0 seg)", fg="gray", font=("Arial", 8)
         ).pack(side="left", padx=(5, 0))
 
-        # Fila 4: Botón de envío
+        # Fila 5: Botón de envío
         button_row = tk.Frame(form_container)
         button_row.pack(fill="x", pady=15)
 
@@ -441,6 +456,40 @@ class McControlApp:
 
         # Cargar Micro Controladores iniciales
         # self.refresh_sensors_list()
+
+    def create_menu(self):
+        """Crea el menú principal"""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # Menú Archivo
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Archivo", menu=file_menu)
+        file_menu.add_command(label="Exportar Datos", command=self.export_to_csv)
+        file_menu.add_separator()
+        file_menu.add_command(label="Salir", command=self.root.quit)
+
+        # Menú Conexión
+        connection_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Conexión", menu=connection_menu)
+        connection_menu.add_command(
+            label="Conectar/Desconectar", command=print("Conectar/desconectar|")
+        )
+        connection_menu.add_command(
+            label="Configurar Puerto", command=print("configurar Puerto")
+        )
+
+    def make_package(self, data):
+        """"Crea el paquete a enviar que consiste en un header + payload"""
+        package = ""
+        required_keys = ["selected_mc", "selected_command", "num_executions", "time_interval"]
+
+        if not all(key in data for key in required_keys):
+            print("Error: Faltan datos para construir el paquete")
+            return None
+        
+        
+        return package
 
     def process_command_form(self):
         """

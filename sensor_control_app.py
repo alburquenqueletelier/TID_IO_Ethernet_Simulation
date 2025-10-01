@@ -8,6 +8,8 @@ from datetime import datetime
 # from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import defaultdict, deque
 import queue
+import re
+
 
 appendix_dict = {
     "X_00_CPU": b"00",
@@ -58,7 +60,8 @@ class McControlApp:
         self.running = False
 
         # Contadores y estadísticas
-        self.mc_available = {}
+        self.mc_available = {}  # keys: mac_source, values: interfaces 
+        self.mc_registered = {} # keys: mac_source, values: dict {  mac_destiny, label}
         self.frames_sent = 0
         self.frames_received = 0
         self.sensor_data = deque(maxlen=1000)  # Últimos 1000 registros
@@ -188,7 +191,7 @@ class McControlApp:
         ###
         # Frame superior para Gestionar Micro Controladores
         stats_frame = tk.LabelFrame(
-            dashboard_frame, text="Centro de Micro Controladores", font=("Arial", 12, "bold")
+            dashboard_frame, text="Panel de gestión de Micro Controladores", font=("Arial", 12, "bold")
         )
         stats_frame.pack(fill="x", padx=10, pady=5)
 
@@ -200,58 +203,124 @@ class McControlApp:
         tk.Label(
             stats_grid, text="Micro Controladores Conectados", font=("Arial", 10, "bold")
         ).grid(row=0, column=0, sticky="w")
-        self.frames_sent_label = tk.Label(stats_grid, text="0", font=("Arial", 10))
+        self.frames_sent_label = tk.Label(stats_grid, text=f"{len(self.mc_available)}", font=("Arial", 10))
         self.frames_sent_label.grid(row=0, column=1, padx=20)
 
-        ###
+        # Tabla de micro controladores pareados interfaz-mac
+        table_frame = tk.Frame(stats_grid)
+        table_frame.grid(row=1, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        # Frame superior para estadísticas
-        stats_frame = tk.LabelFrame(
-            dashboard_frame, text="Estadísticas", font=("Arial", 12, "bold")
+        columns = ("Interfaz de Red", "MAC Origen", "MAC Destino", "Label")
+        self.mc_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=5)
+        for col in columns:
+            self.mc_table.heading(col, text=col)
+            self.mc_table.column(col, width=180, anchor="center")
+
+        # Insertar datos iniciales
+        for mac_source, interfaz in self.mc_available.items():
+            if self.mc_registered.get(f"{mac_source}"):
+                mac_destiny = self.mc_registered.get(f"{mac_source}").get("mac_destiny")
+                label = self.mc_registered.get(f"{mac_source}").get("label")
+                self.mc_table.insert("", "end", values=(interfaz, mac_source, mac_destiny, label))
+
+        self.mc_table.pack(fill="x", expand=True)
+
+        # Botón para refrescar micro controladores conectados
+        refresh_btn = tk.Button(
+            stats_grid,
+            text="🔄 Refrescar Micro Controladores",
+            font=("Arial", 10, "bold"),
+            bg="#3498db",
+            fg="white",
+            command=self.refresh_dashboard_mc_table
         )
-        stats_frame.pack(fill="x", padx=10, pady=5)
+        refresh_btn.grid(row=0, column=2, padx=10)
 
-        # Crear grid para estadísticas
-        stats_grid = tk.Frame(stats_frame)
-        stats_grid.pack(fill="x", padx=10, pady=10)
+        self.refresh_dashboard_mc_table()
 
-        # Tramas enviadas
-        tk.Label(stats_grid, text="Tramas Enviadas:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky="w"
+        # FORMULARIO DE REGISTRO
+        register_frame = tk.LabelFrame(
+            dashboard_frame, text="Registrar Micro Controlador", font=("Arial", 12, "bold")
         )
-        self.frames_sent_label = tk.Label(stats_grid, text=f"{self.frames_sent}", font=("Arial", 10))
-        self.frames_sent_label.grid(row=0, column=1, padx=20)
+        register_frame.pack(fill="x", padx=10, pady=10)
 
-        # Tramas recibidas
-        tk.Label(stats_grid, text="Tramas Recibidas:", font=("Arial", 10, "bold")).grid(
-            row=0, column=2, sticky="w"
-        )
-        self.frames_received_label = tk.Label(stats_grid, text=f"{self.frames_received}", font=("Arial", 10))
-        self.frames_received_label.grid(row=0, column=3, padx=20)
+        form_container = tk.Frame(register_frame)
+        form_container.pack(fill="x", padx=10, pady=10)
 
-        # Evento más común
+        # Fila 1: MAC Origen
+        mac_origen_row = tk.Frame(form_container)
+        mac_origen_row.pack(fill="x", pady=5)
+
         tk.Label(
-            stats_grid, text="Evento Más Común (24h):", font=("Arial", 10, "bold")
-        ).grid(row=1, column=0, sticky="w")
-        self.most_common_event_label = tk.Label(
-            stats_grid, text="N/A", font=("Arial", 10)
+            mac_origen_row,
+            text="MAC Origen:",
+            font=("Arial", 10, "bold"),
+            width=15,
+            anchor="w"
+        ).pack(side="left")
+        
+        self.mac_origen_var = tk.StringVar()
+        self.mac_origen_combo = ttk.Combobox(
+            mac_origen_row,
+            textvariable=self.mac_origen_var,
+            values=list(self.mc_available.keys()),
+            state="readonly",
+            width=30
         )
-        self.most_common_event_label.grid(
-            row=1, column=1, columnspan=3, padx=20, sticky="w"
-        )
+        self.mac_origen_combo.pack(side="left", padx=(10, 0))
+        self.mac_origen_combo.set("Seleccione MAC origen...")
 
-        # Lista de eventos recientes
-        events_frame = tk.LabelFrame(
-            dashboard_frame, text="Eventos Recientes", font=("Arial", 12, "bold")
-        )
-        events_frame.pack(fill="x", padx=10, pady=5)
+        # Fila 2: MAC Destino
+        mac_destino_row = tk.Frame(form_container)
+        mac_destino_row.pack(fill="x", pady=5)
 
-        self.events_listbox = tk.Listbox(events_frame, height=6)
-        events_scrollbar = tk.Scrollbar(events_frame)
-        events_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.events_listbox.pack(fill="x", padx=10, pady=5)
-        self.events_listbox.config(yscrollcommand=events_scrollbar.set)
-        events_scrollbar.config(command=self.events_listbox.yview)
+        tk.Label(
+            mac_destino_row,
+            text="MAC Destino:",
+            font=("Arial", 10, "bold"),
+            width=15,
+            anchor="w"
+        ).pack(side="left")
+        
+        self.mac_destino_var = tk.StringVar()
+        self.mac_destino_entry = tk.Entry(mac_destino_row, textvariable=self.mac_destino_var, width=32)
+        self.mac_destino_entry.pack(side="left", padx=(10, 5))
+        
+        tk.Label(mac_destino_row, text="(ej: fe:80:ab:cd:12:34)", fg="gray", font=("Arial", 8)).pack(side="left")
+
+        # Fila 3: Label
+        label_row = tk.Frame(form_container)
+        label_row.pack(fill="x", pady=5)
+
+        tk.Label(
+            label_row,
+            text="Etiqueta:",
+            font=("Arial", 10, "bold"),
+            width=15,
+            anchor="w"
+        ).pack(side="left")
+        
+        self.label_var = tk.StringVar()
+        label_entry = tk.Entry(label_row, textvariable=self.label_var, width=32)
+        label_entry.pack(side="left", padx=(10, 5))
+        
+        tk.Label(label_row, text="(opcional)", fg="gray", font=("Arial", 8)).pack(side="left")
+
+        # Botón enviar
+        button_row = tk.Frame(form_container)
+        button_row.pack(fill="x", pady=10)
+
+        register_btn = tk.Button(
+            button_row,
+            text="Registrar Micro Controlador",
+            command=self.register_mc,
+            font=("Arial", 10, "bold"),
+            bg="#27ae60",
+            fg="white",
+            width=25,
+            height=1
+        )
+        register_btn.pack()
 
     def create_commands_tab(self):
         """Crea la pestaña de comandos con scroll"""
@@ -260,7 +329,7 @@ class McControlApp:
         self.notebook.add(commands_tab, text="Comandos")
 
         # Detecta y carga las interfaces ethernet
-        self.refresh_sensors_list()
+        self.refresh_mc_list()
         
         # Canvas con scrollbar
         canvas = tk.Canvas(commands_tab, borderwidth=0, highlightthickness=0)
@@ -286,119 +355,79 @@ class McControlApp:
         
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
         
-        # Formulario
-        available_scrollable_frame = tk.LabelFrame(
-            scrollable_frame, text="Formulario para enviar comandos"
+        # Select MC Destino (arriba de ambos frames)
+        mc_select_frame = tk.Frame(scrollable_frame)
+        mc_select_frame.pack(fill="x", padx=10, pady=(5, 0))
+
+        tk.Label(
+            mc_select_frame,
+            text="Micro Controlador Destino:",
+            font=("Arial", 10, "bold"),
+            anchor="w"
+        ).pack(side="left", padx=(0, 10))
+
+        self.mc_var = tk.StringVar()
+        self.mc_combo = ttk.Combobox(
+            mc_select_frame,
+            textvariable=self.mc_var,
+            values=self.get_mc_display_list(),
+            state="readonly",
+            width=40,
         )
-        available_scrollable_frame.pack(fill="x", padx=10, pady=5)
+        self.mc_combo.pack(side="left")
+        self.mc_combo.set("Seleccione MC...")
 
-        form_frame = tk.LabelFrame(scrollable_frame, text="Formulario")
-        form_frame.pack(fill="x", padx=10, pady=5)
+        # Formulario X_02_TestTrigger y Controles
+        test_trigger_container = tk.Frame(scrollable_frame)
+        test_trigger_container.pack(fill="x", padx=10, pady=5)
 
-        # Container principal del formulario
+        # Frame izquierdo: X_02_TestTrigger
+        form_frame = tk.LabelFrame(test_trigger_container, text="X_02_TestTrigger")
+        form_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+
+        # Container del formulario
         form_container = tk.Frame(form_frame)
         form_container.pack(fill="x", padx=10, pady=10)
 
-        # Fila 0: select de micro controlador
-        mc_row = tk.Frame(form_container)
-        mc_row.pack(fill="x", pady=5)
+        # ELIMINAR la Fila 1 del select MC (ya no va aquí)
 
-        tk.Label(
-            mc_row,
-            text="Micro Controlador:",
-            font=("Arial", 10, "bold"),
-            width=20,
-            anchor="w",
-        ).pack(side="left")
-        self.mc_var = tk.StringVar()
-        mc_combo = ttk.Combobox(
-            mc_row,
-            textvariable=self.mc_var,
-            values=list(self.mc_available.keys()),
-            state="readonly",
-            width=30,
-        )
-        mc_combo.pack(side="left", padx=(10, 0))
-        mc_combo.set("Seleccione un comando...")  # Valor por defecto
-
-        # Fila 1: Input de MAC microcontrolador 
-        destiny_row = tk.Frame(form_container)
-        destiny_row.pack(fill="x", pady=5)
-
-        tk.Label(
-            destiny_row,
-            text="MAC MC Destino:",
-            font=("Arial", 10, "bold"),
-            width=20,
-            anchor="w",
-        ).pack(side="left")
-        self.mac_destino_var = tk.StringVar()
-        mac_destino_entry = tk.Entry(destiny_row, textvariable=self.mac_destino_var, width=30)
-        mac_destino_entry.pack(side="left", padx=(10, 0))
-
-        # Fila 2: Select de comando
-        command_row = tk.Frame(form_container)
-        command_row.pack(fill="x", pady=5)
-
-        tk.Label(
-            command_row,
-            text="Tipo de Comando:",
-            font=("Arial", 10, "bold"),
-            width=20,
-            anchor="w",
-        ).pack(side="left")
-        self.command_var = tk.StringVar()
-        command_combo = ttk.Combobox(
-            command_row,
-            textvariable=self.command_var,
-            values=list(self.commands.keys()),
-            state="readonly",
-            width=30,
-        )
-        command_combo.pack(side="left", padx=(10, 0))
-        command_combo.set("Seleccione un comando...")  # Valor por defecto
-
-        # Fila 3: Número de ejecuciones
+        # Fila 1: Número de ejecuciones (antes era Fila 2)
         executions_row = tk.Frame(form_container)
-        executions_row.pack(fill="x", pady=5)
+        executions_row.pack(fill="x", pady=3)
 
         tk.Label(
             executions_row,
-            text="N° de Ejecuciones:",
-            font=("Arial", 10, "bold"),
-            width=20,
+            text="Ejecuciones:",
+            font=("Arial", 9, "bold"),
+            width=12,
             anchor="w",
         ).pack(side="left")
 
-        # Spinbox para número de ejecuciones
         self.executions_var = tk.IntVar(value=1)
         executions_spinbox = tk.Spinbox(
             executions_row,
             from_=1,
             to=100,
             textvariable=self.executions_var,
-            width=10,
+            width=8,
             justify="center",
         )
-        executions_spinbox.pack(side="left", padx=(10, 0))
+        executions_spinbox.pack(side="left", padx=(5, 3))
 
-        tk.Label(executions_row, text="(1-100)", fg="gray", font=("Arial", 8)).pack(
-            side="left", padx=(5, 0)
-        )
+        tk.Label(executions_row, text="(1-100)", fg="gray", font=("Arial", 7)).pack(side="left")
 
-        # Fila 4: Intervalo de tiempo
+        # Fila 2: Intervalo de tiempo (antes era Fila 3)
         interval_row = tk.Frame(form_container)
-        interval_row.pack(fill="x", pady=5)
+        interval_row.pack(fill="x", pady=3)
 
         tk.Label(
             interval_row,
-            text="Intervalo (segundos):",
-            font=("Arial", 10, "bold"),
-            width=20,
+            text="Intervalo (seg):",
+            font=("Arial", 9, "bold"),
+            width=12,
             anchor="w",
         ).pack(side="left")
 
-        # Spinbox para intervalo de tiempo
         self.interval_var = tk.DoubleVar(value=1.0)
         interval_spinbox = tk.Spinbox(
             interval_row,
@@ -406,46 +435,77 @@ class McControlApp:
             to=3600.0,
             increment=0.5,
             textvariable=self.interval_var,
-            width=10,
+            width=8,
             justify="center",
             format="%.1f",
         )
-        interval_spinbox.pack(side="left", padx=(10, 0))
+        interval_spinbox.pack(side="left", padx=(5, 3))
 
-        tk.Label(
-            interval_row, text="(0.1-3600.0 seg)", fg="gray", font=("Arial", 8)
-        ).pack(side="left", padx=(5, 0))
+        tk.Label(interval_row, text="(0.1-3600)", fg="gray", font=("Arial", 7)).pack(side="left")
 
-        # Fila 5: Botón de envío
+        # Botón de envío
         button_row = tk.Frame(form_container)
-        button_row.pack(fill="x", pady=15)
-
-        # Centrar el botón
-        button_container = tk.Frame(button_row)
-        button_container.pack()
+        button_row.pack(fill="x", pady=(10, 0))
 
         send_form_btn = tk.Button(
-            button_container,
-            text="🚀 Enviar Comando",
+            button_row,
+            text="🚀 Enviar",
             command=self.process_command_form,
-            font=("Arial", 11, "bold"),
+            font=("Arial", 10, "bold"),
             bg="#2ecc71",
             fg="white",
-            width=20,
-            height=2,
+            width=18,
+            height=1,
             relief="raised",
-            bd=2,
         )
         send_form_btn.pack()
 
-        # # Información adicional
-        # info_row = tk.Frame(form_container)
-        # info_row.pack(fill="x", pady=(10, 0))
+        # Frame derecho: Controles (Switches)
+        controls_frame = tk.LabelFrame(test_trigger_container, text="Controles")
+        controls_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
-        # info_text = "💡 Seleccione Micro Controladores arriba, configure el comando y ejecute"
-        # tk.Label(
-        #     info_row, text=info_text, fg="gray", font=("Arial", 9, "italic")
-        # ).pack()
+        # Container de switches
+        switches_container = tk.Frame(controls_frame)
+        switches_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Inicializar estados de switches
+        self.switch_states = {
+            "Read Out": tk.BooleanVar(value=False),
+            "Diagnosis": tk.BooleanVar(value=False)
+        }
+
+        # Crear switches
+        for switch_name in ["Read Out", "Diagnosis"]:
+            switch_frame = tk.Frame(switches_container)
+            switch_frame.pack(fill="x", pady=5)
+            
+            tk.Label(
+                switch_frame,
+                text=switch_name + ":",
+                font=("Arial", 9),
+                width=12,
+                anchor="w"
+            ).pack(side="left")
+            
+            switch_btn = tk.Checkbutton(
+                switch_frame,
+                variable=self.switch_states[switch_name],
+                command=lambda name=switch_name: self.toggle_switch(name),
+                font=("Arial", 9)
+            )
+            switch_btn.pack(side="left")
+            
+            # Indicador de estado
+            state_label = tk.Label(
+                switch_frame,
+                text="Apagado",
+                fg="red",
+                font=("Arial", 8)
+            )
+            state_label.pack(side="left", padx=(5, 0))
+            
+            # Guardar referencia del label
+            setattr(self, f"{switch_name.lower().replace(' ', '_')}_state_label", state_label)
 
         # Frame de respuestas del sistema
         response_frame = tk.LabelFrame(scrollable_frame, text="Respuestas del Sistema")
@@ -453,9 +513,6 @@ class McControlApp:
 
         self.response_text = scrolledtext.ScrolledText(response_frame, height=8)
         self.response_text.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # Cargar Micro Controladores iniciales
-        # self.refresh_sensors_list()
 
     def create_menu(self):
         """Crea el menú principal"""
@@ -482,7 +539,7 @@ class McControlApp:
     def make_package(self, data):
         """"Crea el paquete a enviar que consiste en un header + payload"""
         package = ""
-        required_keys = ["selected_mc", "selected_command", "num_executions", "time_interval"]
+        required_keys = ["selected_mc", "selected_command"]
 
         if not all(key in data for key in required_keys):
             print("Error: Faltan datos para construir el paquete")
@@ -503,7 +560,8 @@ class McControlApp:
         """
 
         # Obtener datos del formulario
-        selected_mc = self.mc_var.get()
+        selected_mc_display = self.mc_var.get() 
+        selected_mc = self.get_mac_from_selection(selected_mc_display)
         selected_command = self.command_var.get()
         num_executions = self.executions_var.get()
         time_interval = self.interval_var.get()
@@ -581,7 +639,47 @@ class McControlApp:
             )
             self.add_response("─" * 50)
 
-    def refresh_sensors_list(self):
+    def toggle_switch(self, switch_name):
+        """Maneja el cambio de estado de los switches con estado de carga"""
+        import threading
+        
+        # Obtener el estado actual
+        is_on = self.switch_states[switch_name].get()
+        
+        # Obtener label de estado
+        state_label_name = f"{switch_name.lower().replace(' ', '_')}_state_label"
+        state_label = getattr(self, state_label_name, None)
+        
+        if not state_label:
+            return
+        
+        # Mostrar estado "Cargando..."
+        state_label.config(text="Cargando...", fg="orange")
+        self.add_response(f"⏳ {switch_name} - Esperando respuesta...")
+        
+        # Simular delay de comunicación con FPGA en thread separado
+        def process_switch():
+            import time
+            time.sleep(1)  # Simular delay de 2 segundos
+            
+            # Actualizar interfaz en el thread principal
+            self.root.after(0, lambda: self.update_switch_state(switch_name, is_on, state_label))
+        
+        # Ejecutar en thread para no bloquear la UI
+        threading.Thread(target=process_switch, daemon=True).start()
+
+    def update_switch_state(self, switch_name, is_on, state_label):
+        """Actualiza el estado final del switch después del delay"""
+        if is_on:
+            print(f"{switch_name} Encendido")
+            state_label.config(text="Encendido", fg="green")
+            self.add_response(f"✓ {switch_name} Encendido")
+        else:
+            print(f"{switch_name} Apagado")
+            state_label.config(text="Apagado", fg="red")
+            self.add_response(f"✗ {switch_name} Apagado")
+
+    def refresh_mc_list(self):
         """Actualiza la lista de interfaces ethernet conectadas y sus MACs"""
         
         # Limpiar datos previos
@@ -615,10 +713,98 @@ class McControlApp:
                 self.mc_available[mac] = iface_name
                 display_text = f"{iface_name} (MAC: {mac})"
         
-        print("Interfaces ethernet detectadas:")
-        for mac, iface in self.mc_available.items():
-            print(f"{iface}: {mac}")
+        # # Para debbuging
+        # print("Interfaces ethernet detectadas:")
+        # for mac, iface in self.mc_available.items():
+        #     print(f"{iface}: {mac}")
+
+        self.frames_sent_label.config(text=str(len(self.mc_available)))
+
+    def get_mc_display_list(self):
+        """Retorna lista formateada de MCs registrados: label | mac"""
+        display_list = []
+        for mac_origen in self.mc_available.keys():
+            if mac_origen in self.mc_registered:
+                label = self.mc_registered[mac_origen].get("label", "Sin etiqueta")
+                mac_destino = self.mc_registered[mac_origen].get("mac_destiny", "N/A")
+                display_list.append(f"{label} | {mac_destino}")
+            else:
+                display_list.append(f"No registrado")
+        return display_list
+
+    def get_mac_from_selection(self, selection):
+        """Extrae la MAC de la selección del combobox"""
+        if " | " in selection:
+            return selection.split(" | ")[1]
+        return None
     
+    def refresh_dashboard_mc_table(self):
+        """Refresca la lista y tabla de micro controladores en el dashboard"""
+        self.refresh_mc_list()
+        # Actualizar combobox de MAC origen
+        if hasattr(self, 'mac_origen_combo'):
+            self.mac_origen_combo['values'] = list(self.mc_available.keys())
+
+        # Actualizar combobox de MC destino (comandos)
+        if hasattr(self, 'mc_combo'):
+            self.mc_combo['values'] = self.get_mc_display_list()
+
+        # Limpiar la tabla
+        for row in self.mc_table.get_children():
+            self.mc_table.delete(row)
+
+        # Insertar datos actualizados
+        for mac_source, interfaz in self.mc_available.items():
+            if mac_source in self.mc_registered:
+                mac_destiny = self.mc_registered[mac_source].get("mac_destiny", "N/A")
+                label = self.mc_registered[mac_source].get("label", "Sin Label")
+            else:
+                mac_destiny = "No registrado"
+                label = "N/A"
+        
+            self.mc_table.insert("", "end", values=(interfaz, mac_source, mac_destiny, label))
+    
+    def register_mc(self):
+        """Procesa el registro de un micro controlador"""
+        
+        mac_origen = self.mac_origen_var.get()
+        mac_destino = self.mac_destino_var.get().strip().lower()
+        label = self.label_var.get().strip()
+        
+        # Validaciones
+        if not mac_origen or mac_origen == "Seleccione MAC origen...":
+            messagebox.showwarning("Validación", "Debe seleccionar una MAC de origen")
+            return
+        
+        if not mac_destino:
+            messagebox.showwarning("Validación", "Debe ingresar una MAC de destino")
+            return
+        
+        # Validar formato MAC (soporta : y - como separadores)
+        mac_pattern = r'^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$'
+        if not re.match(mac_pattern, mac_destino):
+            messagebox.showerror("Validación", "Formato de MAC inválido\nUse formato: fe:80:ab:cd:12:34")
+            return
+        
+        # Normalizar formato (usar : como separador)
+        mac_destino = mac_destino.replace('-', ':')
+        
+        # Registrar en diccionario
+        self.mc_registered[mac_origen] = {
+            "mac_destiny": mac_destino,
+            "label": label if label else "Sin etiqueta"
+        }
+        
+        # Limpiar formulario
+        self.mac_origen_var.set("Seleccione MAC origen...")
+        self.mac_destino_var.set("")
+        self.label_var.set("")
+        
+        # Refrescar tabla
+        self.refresh_dashboard_mc_table()
+        
+        messagebox.showinfo("Éxito", f"Micro Controlador registrado:\n{mac_origen} → {mac_destino}")
+
     def create_menu(self):
         """Crea el menú principal"""
         menubar = tk.Menu(self.root)

@@ -35,6 +35,7 @@ Con gestor de ambiente venv
 1. Crear ambiente si no existe: `python3 -m venv .venv`
 2. Levantar ambiente: `source .venv/bin/activate`
 3. Instalar dependencias: `pip install -r requirements.txt`
+4. Instalar tkinter globalmente (no siempre viene) `sudo apt-get install python3-tk`
 
 ## Ejecución
 Ejecutar: `python3 sensor_control_app.py`

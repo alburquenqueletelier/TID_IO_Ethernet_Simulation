@@ -1,48 +1,48 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
-import sqlite3
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import psutil
 import json
 from datetime import datetime 
-# import matplotlib.pyplot as plt
-# from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import defaultdict, deque
-import queue
 import re
-
+import threading
+import time
+import csv
+from scapy.all import Ether, Raw, sendp
+import os
+import json
 
 appendix_dict = {
-    "X_00_CPU": b"00",
-    "X_02_TestTrigger": b"02",
-    "X_03_RO_Single": b"03",
-    "X_04_RO_ON": b"04",
-    "X_05_RO_OFF": b"05",
-    "X_08_DIAG_": b"08",
-    "X_09_DIAG_DIS": b"09",
-    "X_F9_TTrig_Global": b"F9",
-    "X_FA_TTrig_Local": b"FA",
-    "X_FB_TTrig_Auto_EN": b"FB",
-    "X_FC_TTrig_Auto_DIS": b"FC",
-    "X_FF_Reset": b"FF",
-    "X_20_PwrDwnb_TOP_ON": b"20",
-    "X_21_PwrDwnb_TOP_OFF": b"21",
-    "X_22_PwrDwnb_BOT_ON": b"22",
-    "X_23_PwrDwnb_BOT_OFF": b"23",
-    "X_24_PwrEN_2V4A_ON": b"24",
-    "X_25_PwrEN_2V4A_OFF": b"25",
-    "X_26_PwrEN_2V4D_ON": b"26",
-    "X_27_PwrEN_2V4D_OFF": b"27",
-    "X_28_PwrEN_3V1_ON": b"28",
-    "X_29_PwrEN_3V1_OFF": b"29",
-    "X_2A_PwrEN_1V8A_ON": b"2A",
-    "X_2B_PwrEN_1V8A_OFF": b"2B",
-    "X_E0_FanSpeed0_Low": b"E0",
-    "X_E1_FanSpeed0_High": b"E1",
-    "X_E2_FanSpeed1_Low": b"E2",
-    "X_E3_FanSpeed1_High": b"E3",
+    "X_00_CPU": b'\x00',
+    "X_02_TestTrigger": b'\x02',
+    "X_03_RO_Single": b'\x03',
+    "X_04_RO_ON": b'\x04',
+    "X_05_RO_OFF": b'\x05',
+    "X_08_DIAG_": b'\x08',
+    "X_09_DIAG_DIS": b'\x09',
+    "X_F9_TTrig_Global": b'\xf9',
+    "X_FA_TTrig_Local": b'\xfa',
+    "X_FB_TTrig_Auto_EN": b'\xfb',
+    "X_FC_TTrig_Auto_DIS": b'\xfc',
+    "X_FF_Reset": b'\xff',
+    "X_20_PwrDwnb_TOP_ON": b'\x20',
+    "X_21_PwrDwnb_TOP_OFF": b'\x21',
+    "X_22_PwrDwnb_BOT_ON": b'\x22',
+    "X_23_PwrDwnb_BOT_OFF": b'\x23',
+    "X_24_PwrEN_2V4A_ON": b'\x24',
+    "X_25_PwrEN_2V4A_OFF": b'\x25',
+    "X_26_PwrEN_2V4D_ON": b'\x26',
+    "X_27_PwrEN_2V4D_OFF": b'\x27',
+    "X_28_PwrEN_3V1_ON": b'\x28',
+    "X_29_PwrEN_3V1_OFF": b'\x29',
+    "X_2A_PwrEN_1V8A_ON": b'\x2a',
+    "X_2B_PwrEN_1V8A_OFF": b'\x2b',
+    "X_E0_FanSpeed0_Low": b'\xe0',
+    "X_E1_FanSpeed0_High": b'\xe1',
+    "X_E2_FanSpeed1_Low": b'\xe2',
+    "X_E3_FanSpeed1_High": b'\xe3',
 }
-
-
+db_json = "db.json"
 class McControlApp:
     def __init__(self, root):
         self.root = root
@@ -55,13 +55,11 @@ class McControlApp:
 
         # Variables de estado
         self.admin_in = False
-        self.serial_connection = None
-        self.data_queue = queue.Queue()
         self.running = False
 
         # Contadores y estadísticas
         self.mc_available = {}  # keys: mac_source, values: interfaces 
-        self.mc_registered = {} # keys: mac_source, values: dict {  mac_destiny, label}
+        self.mc_registered = {} # keys: mac_source, values: dict {  mac_destiny, interface_destiny, label}
         self.frames_sent = 0
         self.frames_received = 0
         self.sensor_data = deque(maxlen=1000)  # Últimos 1000 registros
@@ -74,39 +72,42 @@ class McControlApp:
         self.create_main_interface()
 
     def init_database(self):
-        """Inicializa la base de datos SQLite"""
-        self.conn = sqlite3.connect("sensor_data.db", check_same_thread=False)
-        cursor = self.conn.cursor()
+        """Inicializa el almacenamiento y gestión de estados desde db.json"""
+        nombre_archivo = db_json
+        
+        if os.path.exists(nombre_archivo):
+            # El archivo existe: intenta cargarlo
+            try:
+                with open(nombre_archivo, 'r', encoding='utf-8') as f:
+                    # Intenta cargar el contenido en self.db
+                    self.db = json.load(f)
+                    matched_macs = self.db.get("mc_registered")
+                    for mac_origin in matched_macs.keys():
+                        self.mc_registered[mac_origin] = matched_macs.get(mac_origin)
 
-        # Tabla para datos de Micro Controladores
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sensor_readings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                sensor_type TEXT,
-                sensor_id TEXT,
-                value REAL,
-                unit TEXT,
-                metadata TEXT
-            )
-        """
-        )
+                print(f"Archivo '{nombre_archivo}' cargado exitosamente.")
+                
+            except json.JSONDecodeError:
+                # Caso: El archivo existe, pero está vacío o mal formado (corrupto)
+                print(f"Advertencia: '{nombre_archivo}' está vacío o corrupto. Inicializando con diccionario vacío.")
+                self.db = {}
+                
+            except Exception as e:
+                # Manejo de otros posibles errores de lectura
+                print(f"Error al leer '{nombre_archivo}': {e}")
+                self.db = {}
 
-        # Tabla para comunicación
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS communication_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                direction TEXT,
-                data TEXT,
-                frame_type TEXT
-            )
-        """
-        )
-
-        self.conn.commit()
+        else:
+            # El archivo NO existe: créalo e inicializa self.db
+            self.db = {}
+            try:
+                with open(nombre_archivo, 'w', encoding='utf-8') as f:
+                    # Escribe el diccionario vacío en el nuevo archivo (con formato legible)
+                    json.dump(self.db, f, indent=4)
+                print(f"Archivo '{nombre_archivo}' creado e inicializado con éxito.")
+                
+            except Exception as e:
+                print(f"Error al crear '{nombre_archivo}': {e}")
 
     def create_login_screen(self):
         """Crea la pantalla de login"""
@@ -174,12 +175,6 @@ class McControlApp:
         self.create_dashboard_tab()
         self.create_commands_tab()
 
-        # Barra de estado
-        self.status_bar = tk.Label(
-            self.root, text="Desconectado", bd=1, relief=tk.SUNKEN, anchor=tk.W
-        )
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
         # Menú
         self.create_menu()
 
@@ -210,11 +205,13 @@ class McControlApp:
         table_frame = tk.Frame(stats_grid)
         table_frame.grid(row=1, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        columns = ("Interfaz de Red", "MAC Origen", "MAC Destino", "Label")
+        columns = ("Interfaz de Red", "MAC Origen", "MAC Destino", "Interfaz Destino", "Label")  # <-- AGREGADA COLUMNA
         self.mc_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=5)
         for col in columns:
             self.mc_table.heading(col, text=col)
-            self.mc_table.column(col, width=180, anchor="center")
+            self.mc_table.column(col, width=150, anchor="center")  
+
+        self.mc_table.pack(fill="x", expand=True)
 
         # Insertar datos iniciales
         for mac_source, interfaz in self.mc_available.items():
@@ -281,14 +278,32 @@ class McControlApp:
             width=15,
             anchor="w"
         ).pack(side="left")
-        
+
         self.mac_destino_var = tk.StringVar()
         self.mac_destino_entry = tk.Entry(mac_destino_row, textvariable=self.mac_destino_var, width=32)
         self.mac_destino_entry.pack(side="left", padx=(10, 5))
-        
+
         tk.Label(mac_destino_row, text="(ej: fe:80:ab:cd:12:34)", fg="gray", font=("Arial", 8)).pack(side="left")
 
-        # Fila 3: Label
+        # Fila 3: Interfaz Destino (NUEVA)
+        interface_destino_row = tk.Frame(form_container)
+        interface_destino_row.pack(fill="x", pady=5)
+
+        tk.Label(
+            interface_destino_row,
+            text="Interfaz Destino:",
+            font=("Arial", 10, "bold"),
+            width=15,
+            anchor="w"
+        ).pack(side="left")
+
+        self.interface_destino_var = tk.StringVar()
+        interface_destino_entry = tk.Entry(interface_destino_row, textvariable=self.interface_destino_var, width=32)
+        interface_destino_entry.pack(side="left", padx=(10, 5))
+
+        tk.Label(interface_destino_row, text="(ej: eth0, enp3s0)", fg="gray", font=("Arial", 8)).pack(side="left")
+
+        # Fila 4: Label (antes era Fila 3)
         label_row = tk.Frame(form_container)
         label_row.pack(fill="x", pady=5)
 
@@ -450,7 +465,7 @@ class McControlApp:
         send_form_btn = tk.Button(
             button_row,
             text="🚀 Enviar",
-            command=self.process_command_form,
+            command=lambda: self.process_command_form("X_02_TestTrigger"),
             font=("Arial", 10, "bold"),
             bg="#2ecc71",
             fg="white",
@@ -470,12 +485,12 @@ class McControlApp:
 
         # Inicializar estados de switches
         self.switch_states = {
-            "Read Out": tk.BooleanVar(value=False),
+            "ReadOut": tk.BooleanVar(value=False),
             "Diagnosis": tk.BooleanVar(value=False)
         }
 
         # Crear switches
-        for switch_name in ["Read Out", "Diagnosis"]:
+        for switch_name in ["ReadOut", "Diagnosis"]:
             switch_frame = tk.Frame(switches_container)
             switch_frame.pack(fill="x", pady=5)
             
@@ -526,47 +541,37 @@ class McControlApp:
         file_menu.add_separator()
         file_menu.add_command(label="Salir", command=self.root.quit)
 
-        # Menú Conexión
-        connection_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Conexión", menu=connection_menu)
-        connection_menu.add_command(
-            label="Conectar/Desconectar", command=print("Conectar/desconectar|")
-        )
-        connection_menu.add_command(
-            label="Configurar Puerto", command=print("configurar Puerto")
-        )
-
-    def make_package(self, data):
-        """"Crea el paquete a enviar que consiste en un header + payload"""
-        package = ""
-        required_keys = ["selected_mc", "selected_command"]
-
-        if not all(key in data for key in required_keys):
-            print("Error: Faltan datos para construir el paquete")
-            return None
-        
-        
-        return package
-
-    def process_command_form(self):
-        """
-        Procesa el formulario de comandos con los datos ingresados
-
-        Esta función debe ser implementada para:
-        1. Validar los datos del formulario
-        2. Obtener los Micro Controladores seleccionados
-        3. Ejecutar el comando según los parámetros especificados
-        4. Mostrar progreso/resultados al usuario
-        """
+    def process_command_form(self, command):
+        """Procesa el formulario de comandos con los datos ingresados"""
 
         # Obtener datos del formulario
         selected_mc_display = self.mc_var.get() 
         selected_mc = self.get_mac_from_selection(selected_mc_display)
-        selected_command = self.command_var.get()
+        selected_command = command
         num_executions = self.executions_var.get()
         time_interval = self.interval_var.get()
 
+        # Obtener MAC origen (del host hacia el MC) y interface destino
+        mac_origen = None
+        interface = None  
+        label = None
+        
+        for mac_src, data in self.mc_registered.items():
+            if data.get("mac_destiny") == selected_mc:
+                mac_origen = mac_src
+                interface = data.get("interface_destiny") 
+                label = data.get("label")
+                break
+
         # Validaciones
+        if not mac_origen:
+            messagebox.showwarning("Validación", "Mac de origen sin mapear con mac de destino")
+            return
+        
+        if not interface:  
+            messagebox.showwarning("Validación", "Interfaz de destino no encontrada")
+            return
+        
         if not selected_command or selected_command == "Seleccione un comando...":
             messagebox.showwarning("Validación", "Debe seleccionar un tipo de comando")
             return
@@ -579,69 +584,73 @@ class McControlApp:
                 return
 
         if num_executions < 1:
-            messagebox.showwarning(
-                "Validación", "El número de ejecuciones debe ser mayor a 0"
-            )
+            messagebox.showwarning("Validación", "El número de ejecuciones debe ser mayor a 0")
             return
 
         if time_interval < 0.1:
-            messagebox.showwarning(
-                "Validación", "El intervalo debe ser mayor a 0.1 segundos"
-            )
+            messagebox.showwarning("Validación", "El intervalo debe ser mayor a 0.1 segundos")
             return
 
         # Obtener el valor del diccionario
         command_value = self.commands.get(selected_command)
 
-        # Mostrar información de lo que se va a ejecutar
+        # Mostrar información
         info_message = f"""
     Comando a ejecutar: {selected_command}
-    Valor del comando: {command_value}
-    Micro Controladores objetivo: {', '.join(selected_mc) if selected_mc else 'Comando general'}
+    Apéndice: {command_value}
+    Micro Controladores objetivo: {label} | {selected_mc}
+    Interfaz de envío: {interface}
     Número de ejecuciones: {num_executions}
     Intervalo entre ejecuciones: {time_interval} segundos
     Tiempo total estimado: {num_executions * time_interval:.1f} segundos
         """.strip()
 
         if messagebox.askyesno("Confirmar Ejecución", info_message):
-            # Ejemplo de estructura:
-            """
-            try:
-                self.execute_command_sequence(
-                    command_value=command_value,
-                    target_mc=selected_mc,
-                    executions=num_executions,
-                    interval=time_interval
-                )
-            except Exception as e:
-                messagebox.showerror("Error", f"Error ejecutando comando: {str(e)}")
-            """
-
-            # Mstrar en el área de respuestas y imprimir en consola
-            titulo = "FORMULARIO PROCESADO:\n"
-            comando_enviado = f"Comando: {selected_command} valor: ({command_value})"
-            interfaz_usada = f"{self.mc_available.get(selected_mc)}"
-            mc_receptor = f"Micro Controladores: {selected_mc}"
-            n_ejecuciones_y_interv = f"Ejecuciones: {num_executions}, Intervalo: {time_interval}s"
-            print(titulo)
-            print(comando_enviado)
-            print(interfaz_usada)
-            print(mc_receptor)
-            print(n_ejecuciones_y_interv)
-
-            ## Mostrar Salida en "Respuestas del sistema"
-            #TODO agregar salida de eventos en dashboard
+            # Mostrar en el área de respuestas
             self.add_response(f"FORMULARIO PROCESADO:")
-            self.add_response(f"Comando: {selected_command} ({command_value})")
-            self.add_response(f"Micro Controladores: {selected_mc}")
-            self.add_response(
-                f"Ejecuciones: {num_executions}, Intervalo: {time_interval}s"
-            )
+            self.add_response(f"Comando: {selected_command} | Apéndice: {command_value}")
+            self.add_response(f"MC Objetivo: {label} | {selected_mc}")
+            self.add_response(f"Interfaz: {interface}")
+            self.add_response(f"Ejecuciones: {num_executions}, Intervalo: {time_interval}s")
             self.add_response("─" * 50)
+
+            def process_form():
+                try:
+                    mac_origen_bytes = bytes.fromhex(mac_origen.replace(':', ''))
+                    mac_destino_bytes = bytes.fromhex(selected_mc.replace(':', ''))
+                    payload_length = 7
+                    length_bytes = payload_length.to_bytes(2, byteorder='big')
+                    padding_bytes = b'\x00\x00\x00\x00'
+                    constant_bytes = b'\x02\x03' 
+                    appendix = appendix_dict.get(selected_command)
+                    
+                    packet = (
+                        mac_destino_bytes +
+                        mac_origen_bytes +
+                        length_bytes +
+                        padding_bytes +
+                        constant_bytes +
+                        appendix
+                    )
+                
+                    # Enviar paquete
+                    scapy_packet = Raw(load=packet)
+                    sendp(scapy_packet, iface=interface, verbose=False)
+                    
+                    self.add_response(f"Comando enviado vía {interface}")
+                    
+                except Exception as e:
+                    self.add_response(f"Error: {str(e)}")
+
+            # Ejecutar múltiples veces con intervalo
+            for i in range(num_executions):
+                if i > 0:
+                    time.sleep(time_interval)
+                threading.Thread(target=process_form, daemon=True).start()
+                self.add_response(f"→ Ejecución {i+1}/{num_executions}")
 
     def toggle_switch(self, switch_name):
         """Maneja el cambio de estado de los switches con estado de carga"""
-        import threading
         
         # Obtener el estado actual
         is_on = self.switch_states[switch_name].get()
@@ -655,18 +664,127 @@ class McControlApp:
         
         # Mostrar estado "Cargando..."
         state_label.config(text="Cargando...", fg="orange")
-        self.add_response(f"⏳ {switch_name} - Esperando respuesta...")
+        self.add_response(f"⏳ {switch_name} - Ejecutandose...")
         
         # Simular delay de comunicación con FPGA en thread separado
         def process_switch():
-            import time
-            time.sleep(1)  # Simular delay de 2 segundos
+            # Enviar comando al MC
+            self.send_toggle_switch_command(switch_name, is_on)
+            
+            time.sleep(1)  # Simular delay de respuesta
             
             # Actualizar interfaz en el thread principal
             self.root.after(0, lambda: self.update_switch_state(switch_name, is_on, state_label))
         
         # Ejecutar en thread para no bloquear la UI
         threading.Thread(target=process_switch, daemon=True).start()
+
+    def send_toggle_switch_command(self, switch_name, state):
+        """
+        Crea y envía el paquete de comando para el switch
+        
+        Formato del paquete:
+        - 6 bytes: MAC destino
+        - 6 bytes: MAC origen
+        - 2 bytes: Largo del paquete
+        - 4 bytes: 0x00 (reservados)
+        - 2 bytes: 0x02 0x03 (constantes)
+        - 1 byte: Apéndice (comando específico)
+        """
+        
+        # Obtener MAC destino seleccionado
+        selected_mc_display = self.mc_var.get()
+        mac_destino = self.get_mac_from_selection(selected_mc_display)
+        
+        if not mac_destino:
+            print("Error: No hay MC destino seleccionado")
+            self.add_response("Error: Seleccione un MC destino")
+            return None
+        
+        # Obtener MAC origen (del host hacia el MC)
+        mac_origen = None
+        for mac_src, data in self.mc_registered.items():
+            if data.get("mac_destiny") == mac_destino:
+                mac_origen = mac_src
+                break
+        
+        if not mac_origen:
+            print("Error: No se encontró MAC origen para el MC seleccionado")
+            self.add_response("Error: MC no está registrado correctamente")
+            return None
+        
+        # Determinar apéndice según switch y estado
+        appendix_map = {
+            "ReadOut": {
+                True: appendix_dict.get("X_04_RO_ON"), 
+                False: appendix_dict.get("X_05_RO_OFF")
+            },
+            "Diagnosis": {
+                True: appendix_dict.get("X_08_DIAG_"),   
+                False: appendix_dict.get("X_09_DIAG_DIS") 
+            },
+        }
+        
+        appendix = appendix_map.get(switch_name, {}).get(state)
+        
+        # Construir el paquete
+        try:
+            # Convertir MACs de string a bytes
+            mac_destino_bytes = bytes.fromhex(mac_destino.replace(':', ''))
+            mac_origen_bytes = bytes.fromhex(mac_origen.replace(':', ''))
+            
+            # Largo del payload (4 bytes ceros + 2 bytes identificador + 1 byte apéndice = 7 bytes)
+            payload_length = 7 # TODO: se debe calcular para apendice CPU.
+            length_bytes = payload_length.to_bytes(2, byteorder='big') # big indian order (byte más significativo primero)
+            
+            # 4 bytes en 0
+            padding_bytes = b'\x00\x00\x00\x00'
+            
+            # 2 bytes identificador
+            constant_bytes = b'\x02\x03'
+            
+            # Construir paquete completo
+            packet = (
+                mac_destino_bytes +    # 6 bytes
+                mac_origen_bytes +     # 6 bytes
+                length_bytes +         # 2 bytes
+                padding_bytes +       # 4 bytes
+                constant_bytes +     # 2 bytes
+                appendix              # 1 byte
+            )
+            
+            packet_hex = packet.hex(':')
+            self.add_response(f"Paquete {switch_name}: {packet_hex}")
+            
+            interface = self.mc_registered.get(mac_origen)["interface_destiny"]
+            
+            if not interface:
+                print(f"Error: Interfaz no encontrada para MAC origen {mac_origen}")
+                self.add_response("Error: Interfaz de envío no encontrada")
+                return None
+                
+            # Log del paquete
+            print(f"\n--- Paquete {switch_name} ({'ON' if state else 'OFF'}) ---")
+            print(f"MAC Destino:    {mac_destino}")
+            print(f"MAC Origen:     {mac_origen}")
+            print(f"Largo (Type):   {payload_length} bytes")
+            print(f"Apéndice:       {appendix.hex()}")
+            print(f"Paquete completo: {packet_hex}")
+            print(f"Total bytes:    {len(packet)}")
+            
+            # Envío del paquete raw a nivel de Capa 2 (Ethernet)
+            # sendp() necesita un objeto de paquete de Scapy (Ether, Raw, etc.)
+            # Para enviar los bytes exactos incluyendo la cabecera L2:
+            scapy_packet = Raw(load=packet)
+            sendp(scapy_packet, iface=interface, verbose=False)
+            self.add_response(f"Comando enviado a través de {interface}")
+            
+            return packet # Retornar los bytes del paquete
+            
+        except Exception as e:
+            print(f"Error construyendo paquete: {e}")
+            self.add_response(f"Error: {str(e)}")
+            return None
 
     def update_switch_state(self, switch_name, is_on, state_label):
         """Actualiza el estado final del switch después del delay"""
@@ -757,18 +875,21 @@ class McControlApp:
         for mac_source, interfaz in self.mc_available.items():
             if mac_source in self.mc_registered:
                 mac_destiny = self.mc_registered[mac_source].get("mac_destiny", "N/A")
+                interface_destiny = self.mc_registered[mac_source].get("interface_destiny", "N/A") 
                 label = self.mc_registered[mac_source].get("label", "Sin Label")
             else:
                 mac_destiny = "No registrado"
+                interface_destiny = "N/A"
                 label = "N/A"
         
-            self.mc_table.insert("", "end", values=(interfaz, mac_source, mac_destiny, label))
+            self.mc_table.insert("", "end", values=(interfaz, mac_source, mac_destiny, interface_destiny, label))
     
     def register_mc(self):
         """Procesa el registro de un micro controlador"""
         
         mac_origen = self.mac_origen_var.get()
         mac_destino = self.mac_destino_var.get().strip().lower()
+        interface_destino = self.interface_destino_var.get().strip()
         label = self.label_var.get().strip()
         
         # Validaciones
@@ -778,6 +899,10 @@ class McControlApp:
         
         if not mac_destino:
             messagebox.showwarning("Validación", "Debe ingresar una MAC de destino")
+            return
+
+        if not interface_destino:  
+            messagebox.showwarning("Validación", "Debe ingresar una interfaz de destino")
             return
         
         # Validar formato MAC (soporta : y - como separadores)
@@ -792,18 +917,24 @@ class McControlApp:
         # Registrar en diccionario
         self.mc_registered[mac_origen] = {
             "mac_destiny": mac_destino,
+            "interface_destiny": interface_destino,
             "label": label if label else "Sin etiqueta"
         }
         
         # Limpiar formulario
         self.mac_origen_var.set("Seleccione MAC origen...")
         self.mac_destino_var.set("")
+        self.interface_destino_var.set("")
         self.label_var.set("")
         
         # Refrescar tabla
         self.refresh_dashboard_mc_table()
-        
-        messagebox.showinfo("Éxito", f"Micro Controlador registrado:\n{mac_origen} → {mac_destino}")
+
+        try:
+            self.update_db_stats()
+            messagebox.showinfo("Éxito", f"Micro Controlador registrado:\n{mac_origen} → {mac_destino} ({interface_destino})")
+        except Exception: 
+            messagebox.showinfo("Error", f"No fue posible asociar el micro controlador:\n{mac_origen} → {mac_destino} ({interface_destino})")
 
     def create_menu(self):
         """Crea el menú principal"""
@@ -816,40 +947,12 @@ class McControlApp:
         file_menu.add_command(label="Exportar Datos", command=self.export_to_csv)
         file_menu.add_separator()
         file_menu.add_command(label="Salir", command=self.root.quit)
-
-        # Menú Conexión
-        connection_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Conexión", menu=connection_menu)
-        connection_menu.add_command(
-            label="Conectar/Desconectar", command=print("Conectar/desconectar|")
-        )
-        connection_menu.add_command(
-            label="Configurar Puerto", command=print("configurar Puerto")
-        )
-
+        
     def add_response(self, response):
         """Añade una respuesta al área de texto"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.response_text.insert(tk.END, f"[{timestamp}] {response}\n")
         self.response_text.see(tk.END)
-
-    def update_interface(self):
-        """Actualiza la interfaz periódicamente"""
-        # Procesar datos en cola
-        while not self.data_queue.empty():
-            try:
-                data = self.data_queue.get_nowait()
-                self.process_sensor_data(data)
-            except queue.Empty:
-                break
-
-        # Actualizar estadísticas
-        self.frames_received_label.config(text=str(self.frames_received))
-        self.update_most_common_event()
-
-        # Programar siguiente actualización
-        if self.running:
-            self.root.after(1000, self.update_interface)
 
     def save_current_data(self):
         """Guarda los datos actuales en la base de datos"""
@@ -894,8 +997,6 @@ class McControlApp:
 
     def export_to_csv(self):
         """Exporta datos a archivo CSV"""
-        from tkinter import filedialog
-        import csv
 
         if not self.sensor_data:
             messagebox.showinfo("Sin Datos", "No hay datos para exportar")
@@ -957,41 +1058,14 @@ class McControlApp:
 
     def update_db_stats(self):
         """Actualiza las estadísticas de la base de datos"""
+        self.db["mc_registered"] = self.mc_registered
         try:
-            cursor = self.conn.cursor()
-
-            # Contar registros totales
-            cursor.execute("SELECT COUNT(*) FROM sensor_readings")
-            total_records = cursor.fetchone()[0]
-
-            # Contar por tipo de sensor
-            cursor.execute(
-                "SELECT sensor_type, COUNT(*) FROM sensor_readings GROUP BY sensor_type"
-            )
-            type_counts = cursor.fetchall()
-
-            # Último registro
-            cursor.execute(
-                "SELECT timestamp FROM sensor_readings ORDER BY timestamp DESC LIMIT 1"
-            )
-            last_record = cursor.fetchone()
-            last_time = last_record[0] if last_record else "N/A"
-
-            # Actualizar texto de estadísticas
-            stats_text = f"Registros totales: {total_records}\n"
-            stats_text += f"Último registro: {last_time}\n\n"
-            stats_text += "Registros por tipo de sensor:\n"
-
-            for sensor_type, count in type_counts:
-                stats_text += f"  {sensor_type}: {count} registros\n"
-
-            self.db_stats_text.config(state="normal")
-            self.db_stats_text.delete(1.0, tk.END)
-            self.db_stats_text.insert(1.0, stats_text)
-            self.db_stats_text.config(state="disabled")
-
+            with open(db_json, 'w', encoding='utf-8') as f:
+                json.dump(self.db, f, indent=4)
+        except AttributeError:
+            print("Error: self.db no está inicializado. Asegúrese de llamar a init_database primero.")
         except Exception as e:
-            print(f"Error actualizando estadísticas: {e}")
+            print(f"Error al escribir en '{db_json}': {e}")
 
 def main():
     """Función principal para ejecutar la aplicación"""
@@ -1001,8 +1075,6 @@ def main():
     def on_closing():
         """Maneja el cierre de la aplicación"""
         app.running = False
-        if app.serial_connection and app.serial_connection.is_open:
-            app.serial_connection.close()
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)

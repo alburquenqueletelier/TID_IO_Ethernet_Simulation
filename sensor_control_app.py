@@ -62,8 +62,6 @@ class McControlApp:
         self.mc_registered = {} # keys: mac_source, values: dict {  mac_destiny, interface_destiny, label}
         self.frames_sent = 0
         self.frames_received = 0
-        self.sensor_data = deque(maxlen=1000)  # Últimos 1000 registros
-        self.event_types = defaultdict(int)
 
         # Inicializar base de datos
         self.init_database()
@@ -337,6 +335,13 @@ class McControlApp:
         )
         register_btn.pack()
 
+        # Área de respuestas/log
+        response_frame = tk.LabelFrame(dashboard_frame, text="Respuestas / Log", font=("Arial", 10, "bold"))
+        response_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.response_text = scrolledtext.ScrolledText(response_frame, height=8, font=("Consolas", 10))
+        self.response_text.pack(fill="both", expand=True)
+
     def create_commands_tab(self):
         """Crea la pestaña de comandos con scroll"""
         # Frame principal de la pestaña
@@ -392,7 +397,7 @@ class McControlApp:
         self.mc_combo.pack(side="left")
         self.mc_combo.set("Seleccione MC...")
 
-        # Formulario X_02_TestTrigger y Controles
+# Formulario X_02_TestTrigger y Controles
         test_trigger_container = tk.Frame(scrollable_frame)
         test_trigger_container.pack(fill="x", padx=10, pady=5)
 
@@ -404,9 +409,7 @@ class McControlApp:
         form_container = tk.Frame(form_frame)
         form_container.pack(fill="x", padx=10, pady=10)
 
-        # ELIMINAR la Fila 1 del select MC (ya no va aquí)
-
-        # Fila 1: Número de ejecuciones (antes era Fila 2)
+        # Fila 1: Número de ejecuciones
         executions_row = tk.Frame(form_container)
         executions_row.pack(fill="x", pady=3)
 
@@ -431,7 +434,7 @@ class McControlApp:
 
         tk.Label(executions_row, text="(1-100)", fg="gray", font=("Arial", 7)).pack(side="left")
 
-        # Fila 2: Intervalo de tiempo (antes era Fila 3)
+        # Fila 2: Intervalo de tiempo
         interval_row = tk.Frame(form_container)
         interval_row.pack(fill="x", pady=3)
 
@@ -475,59 +478,215 @@ class McControlApp:
         )
         send_form_btn.pack()
 
-        # Frame derecho: Controles (Switches)
-        controls_frame = tk.LabelFrame(test_trigger_container, text="Controles")
+        # ============================================
+        # NUEVO: Formulario X_03_RO_Single
+        # ============================================
+        ro_single_container = tk.Frame(scrollable_frame)
+        ro_single_container.pack(fill="x", padx=10, pady=5)
+
+        # Frame para X_03_RO_Single (lado izquierdo, mismo ancho que TestTrigger)
+        ro_single_frame = tk.LabelFrame(ro_single_container, text="X_03_RO_Single")
+        ro_single_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+
+        # Container del formulario
+        ro_single_form_container = tk.Frame(ro_single_frame)
+        ro_single_form_container.pack(fill="x", padx=10, pady=10)
+
+        # Fila 1: Número de ejecuciones
+        ro_executions_row = tk.Frame(ro_single_form_container)
+        ro_executions_row.pack(fill="x", pady=3)
+
+        tk.Label(
+            ro_executions_row,
+            text="Ejecuciones:",
+            font=("Arial", 9, "bold"),
+            width=12,
+            anchor="w",
+        ).pack(side="left")
+
+        self.ro_executions_var = tk.IntVar(value=1)
+        ro_executions_spinbox = tk.Spinbox(
+            ro_executions_row,
+            from_=1,
+            to=100,
+            textvariable=self.ro_executions_var,
+            width=8,
+            justify="center",
+        )
+        ro_executions_spinbox.pack(side="left", padx=(5, 3))
+
+        tk.Label(ro_executions_row, text="(1-100)", fg="gray", font=("Arial", 7)).pack(side="left")
+
+        # Fila 2: Intervalo de tiempo
+        ro_interval_row = tk.Frame(ro_single_form_container)
+        ro_interval_row.pack(fill="x", pady=3)
+
+        tk.Label(
+            ro_interval_row,
+            text="Intervalo (seg):",
+            font=("Arial", 9, "bold"),
+            width=12,
+            anchor="w",
+        ).pack(side="left")
+
+        self.ro_interval_var = tk.DoubleVar(value=1.0)
+        ro_interval_spinbox = tk.Spinbox(
+            ro_interval_row,
+            from_=0.1,
+            to=3600.0,
+            increment=0.5,
+            textvariable=self.ro_interval_var,
+            width=8,
+            justify="center",
+            format="%.1f",
+        )
+        ro_interval_spinbox.pack(side="left", padx=(5, 3))
+
+        tk.Label(ro_interval_row, text="(0.1-3600)", fg="gray", font=("Arial", 7)).pack(side="left")
+
+        # Botón de envío
+        ro_button_row = tk.Frame(ro_single_form_container)
+        ro_button_row.pack(fill="x", pady=(10, 0))
+
+        send_ro_form_btn = tk.Button(
+            ro_button_row,
+            text="🚀 Enviar",
+            command=lambda: self.process_command_form("X_03_RO_Single"),
+            font=("Arial", 10, "bold"),
+            bg="#2ecc71",
+            fg="white",
+            width=18,
+            height=1,
+            relief="raised",
+        )
+        send_ro_form_btn.pack()
+
+        # Frame derecho vacío para mantener el ancho (se llenará con más comandos después)
+        ro_single_right_frame = tk.LabelFrame(ro_single_container, text="Comandos Adicionales")
+        ro_single_right_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+        
+        # Placeholder para futuros comandos
+        tk.Label(
+            ro_single_right_frame,
+            text="(Espacio para comandos adicionales)",
+            font=("Arial", 9, "italic"),
+            fg="gray"
+        ).pack(pady=20)
+
+        # Frame derecho: Comandos
+        controls_frame = tk.LabelFrame(test_trigger_container, text="Comandos")
         controls_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
-        # Container de switches
-        switches_container = tk.Frame(controls_frame)
-        switches_container.pack(fill="both", expand=True, padx=10, pady=10)
+        # Container principal
+        commands_main_container = tk.Frame(controls_frame)
+        commands_main_container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Inicializar estados de switches
-        self.switch_states = {
-            "ReadOut": tk.BooleanVar(value=False),
-            "Diagnosis": tk.BooleanVar(value=False)
+        # Delta Tiempo Comandos
+        delta_time_frame = tk.Frame(commands_main_container)
+        delta_time_frame.pack(fill="x", pady=(0, 10))
+
+        tk.Label(
+            delta_time_frame,
+            text="Delta Tiempo Comandos (seg):",
+            font=("Arial", 9, "bold")
+        ).pack(side="left")
+
+        self.delta_time_var = tk.DoubleVar(value=0.5)
+        delta_time_spinbox = tk.Spinbox(
+            delta_time_frame,
+            from_=0.1,
+            to=10.0,
+            increment=0.1,
+            textvariable=self.delta_time_var,
+            width=8,
+            justify="center",
+            format="%.1f"
+        )
+        delta_time_spinbox.pack(side="left", padx=(5, 0))
+
+        # Tabla de comandos
+        table_frame = tk.Frame(commands_main_container)
+        table_frame.pack(fill="both", expand=True)
+
+        # Headers
+        header_frame = tk.Frame(table_frame, relief="ridge", borderwidth=1)
+        header_frame.pack(fill="x")
+
+        tk.Label(header_frame, text="", width=3, font=("Arial", 8, "bold")).grid(row=0, column=0)
+        tk.Label(header_frame, text="Comando", width=12, font=("Arial", 8, "bold")).grid(row=0, column=1)
+        tk.Label(header_frame, text="Encender", width=10, font=("Arial", 8, "bold")).grid(row=0, column=2)
+        tk.Label(header_frame, text="Apagar", width=10, font=("Arial", 8, "bold")).grid(row=0, column=3)
+
+        # Definir comandos con sus appendix
+        self.command_configs = {
+            "ReadOut": {
+                "ON": "X_04_RO_ON",
+                "OFF": "X_05_RO_OFF"
+            },
+            "Diagnosis": {
+                "ON": "X_08_DIAG_",
+                "OFF": "X_09_DIAG_DIS"
+            }
         }
 
-        # Crear switches
-        for switch_name in ["ReadOut", "Diagnosis"]:
-            switch_frame = tk.Frame(switches_container)
-            switch_frame.pack(fill="x", pady=5)
-            
-            tk.Label(
-                switch_frame,
-                text=switch_name + ":",
-                font=("Arial", 9),
-                width=12,
-                anchor="w"
-            ).pack(side="left")
-            
-            switch_btn = tk.Checkbutton(
-                switch_frame,
-                variable=self.switch_states[switch_name],
-                command=lambda name=switch_name: self.toggle_switch(name),
-                font=("Arial", 9)
-            )
-            switch_btn.pack(side="left")
-            
-            # Indicador de estado
-            state_label = tk.Label(
-                switch_frame,
-                text="Apagado",
-                fg="red",
-                font=("Arial", 8)
-            )
-            state_label.pack(side="left", padx=(5, 0))
-            
-            # Guardar referencia del label
-            setattr(self, f"{switch_name.lower().replace(' ', '_')}_state_label", state_label)
+        # Estado de comandos: {comando: {"enabled": bool, "state": "ON"/"OFF"/None}}
+        self.commands_state = {}
 
-        # Frame de respuestas del sistema
-        response_frame = tk.LabelFrame(scrollable_frame, text="Respuestas del Sistema")
-        response_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        # Crear filas para cada comando
+        for idx, (cmd_name, cmd_config) in enumerate(self.command_configs.items()):
+            row_frame = tk.Frame(table_frame, relief="ridge", borderwidth=1)
+            row_frame.pack(fill="x")
+            
+            # Inicializar estado
+            self.commands_state[cmd_name] = {"enabled": tk.BooleanVar(value=False), "state": None}
+            
+            # Checkbox
+            checkbox = tk.Checkbutton(
+                row_frame,
+                variable=self.commands_state[cmd_name]["enabled"]
+            )
+            checkbox.grid(row=0, column=0, padx=5)
+            
+            # Nombre del comando
+            tk.Label(row_frame, text=cmd_name, width=12, font=("Arial", 9)).grid(row=0, column=1)
+            
+            # Botón ON
+            on_btn = tk.Button(
+                row_frame,
+                text="ON",
+                width=8,
+                bg="#e0e0e0",
+                command=lambda cmd=cmd_name: self.toggle_command_state(cmd, "ON")
+            )
+            on_btn.grid(row=0, column=2, padx=2, pady=2)
+            
+            # Botón OFF
+            off_btn = tk.Button(
+                row_frame,
+                text="OFF",
+                width=8,
+                bg="#e0e0e0",
+                command=lambda cmd=cmd_name: self.toggle_command_state(cmd, "OFF")
+            )
+            off_btn.grid(row=0, column=3, padx=2, pady=2)
+            
+            # Guardar referencias de botones
+            self.commands_state[cmd_name]["on_btn"] = on_btn
+            self.commands_state[cmd_name]["off_btn"] = off_btn
 
-        self.response_text = scrolledtext.ScrolledText(response_frame, height=8)
-        self.response_text.pack(fill="both", expand=True, padx=5, pady=5)
+        # Botón enviar comandos
+        send_commands_btn = tk.Button(
+            commands_main_container,
+            text="📤 Enviar Comandos Seleccionados",
+            command=self.send_selected_commands,
+            font=("Arial", 10, "bold"),
+            bg="#3498db",
+            fg="white",
+            width=25,
+            height=2,
+            relief="raised"
+        )
+        send_commands_btn.pack(pady=(10, 0))
 
     def create_menu(self):
         """Crea el menú principal"""
@@ -537,7 +696,6 @@ class McControlApp:
         # Menú Archivo
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Archivo", menu=file_menu)
-        file_menu.add_command(label="Exportar Datos", command=self.export_to_csv)
         file_menu.add_separator()
         file_menu.add_command(label="Salir", command=self.root.quit)
 
@@ -797,6 +955,134 @@ class McControlApp:
             state_label.config(text="Apagado", fg="red")
             self.add_response(f"✗ {switch_name} Apagado")
 
+    def toggle_command_state(self, cmd_name, state):
+        """Maneja el toggle de botones ON/OFF para cada comando"""
+        cmd_state = self.commands_state[cmd_name]
+        on_btn = cmd_state["on_btn"]
+        off_btn = cmd_state["off_btn"]
+        
+        # Si presiona el mismo botón que ya está activo, desactivarlo
+        if cmd_state["state"] == state:
+            cmd_state["state"] = None
+            on_btn.config(bg="#e0e0e0", relief="raised")
+            off_btn.config(bg="#e0e0e0", relief="raised")
+            self.add_response(f"🔘 {cmd_name}: Desactivado")
+        else:
+            # Activar el botón presionado
+            cmd_state["state"] = state
+            
+            if state == "ON":
+                on_btn.config(bg="#27ae60", relief="sunken")
+                off_btn.config(bg="#e0e0e0", relief="raised")
+                self.add_response(f"✓ {cmd_name}: ON seleccionado")
+            else:  # OFF
+                off_btn.config(bg="#e74c3c", relief="sunken")
+                on_btn.config(bg="#e0e0e0", relief="raised")
+                self.add_response(f"✗ {cmd_name}: OFF seleccionado")
+
+    def send_selected_commands(self):
+        """Envía todos los comandos seleccionados con delta de tiempo"""
+        # Obtener MC destino
+        selected_mc_display = self.mc_var.get()
+        selected_mc = self.get_mac_from_selection(selected_mc_display)
+        
+        if not selected_mc:
+            messagebox.showwarning("Validación", "Debe seleccionar un Micro Controlador")
+            return
+        
+        # Obtener MAC origen e interfaz
+        mac_origen = None
+        interface = None
+        
+        for mac_src, data in self.mc_registered.items():
+            if data.get("mac_destiny") == selected_mc:
+                mac_origen = mac_src
+                interface = data.get("interface_destiny")
+                break
+        
+        if not mac_origen or not interface:
+            messagebox.showwarning("Validación", "MC no está registrado correctamente")
+            return
+        
+        # Recolectar comandos habilitados
+        commands_to_send = []
+        for cmd_name, cmd_state in self.commands_state.items():
+            if cmd_state["enabled"].get() and cmd_state["state"]:
+                appendix_key = self.command_configs[cmd_name][cmd_state["state"]]
+                commands_to_send.append({
+                    "name": cmd_name,
+                    "state": cmd_state["state"],
+                    "appendix_key": appendix_key
+                })
+        
+        if not commands_to_send:
+            messagebox.showwarning("Validación", "Debe seleccionar al menos un comando")
+            return
+        
+        # Obtener delta de tiempo
+        delta_time = self.delta_time_var.get()
+        
+        # Confirmación
+        cmd_list = "\n".join([f"  • {c['name']}: {c['state']}" for c in commands_to_send])
+        info_msg = f"""
+    Se enviarán {len(commands_to_send)} comando(s):
+    {cmd_list}
+
+    Delta de tiempo: {delta_time}s
+    MC Destino: {selected_mc}
+    Interfaz: {interface}
+        """.strip()
+        
+        if not messagebox.askyesno("Confirmar Envío", info_msg):
+            return
+        
+        self.add_response("=" * 50)
+        self.add_response(f"📡 Enviando {len(commands_to_send)} comando(s)")
+        
+        def send_command_packet(cmd_info, index, total):
+            """Envía un paquete individual"""
+            try:
+                appendix = appendix_dict.get(cmd_info["appendix_key"])
+                
+                # Construir paquete
+                mac_origen_bytes = bytes.fromhex(mac_origen.replace(':', ''))
+                mac_destino_bytes = bytes.fromhex(selected_mc.replace(':', ''))
+                payload_length = 7
+                length_bytes = payload_length.to_bytes(2, byteorder='big')
+                padding_bytes = b'\x00\x00\x00\x00'
+                constant_bytes = b'\x02\x03'
+                
+                packet = (
+                    mac_destino_bytes +
+                    mac_origen_bytes +
+                    length_bytes +
+                    padding_bytes +
+                    constant_bytes +
+                    appendix
+                )
+                
+                # Enviar
+                scapy_packet = Raw(load=packet)
+                sendp(scapy_packet, iface=interface, verbose=False)
+                
+                self.add_response(f"✓ [{index}/{total}] {cmd_info['name']} {cmd_info['state']} enviado")
+                
+            except Exception as e:
+                self.add_response(f"✗ Error en {cmd_info['name']}: {str(e)}")
+        
+        # Enviar comandos con delay
+        def send_all():
+            for i, cmd_info in enumerate(commands_to_send, 1):
+                if i > 1:
+                    time.sleep(delta_time)
+                send_command_packet(cmd_info, i, len(commands_to_send))
+            
+            self.add_response("✓ Todos los comandos enviados")
+            self.add_response("=" * 50)
+        
+        # Ejecutar en thread
+        threading.Thread(target=send_all, daemon=True).start()
+
     def refresh_mc_list(self):
         """Actualiza la lista de interfaces ethernet conectadas y sus MACs"""
         
@@ -944,8 +1230,7 @@ class McControlApp:
         # Menú Archivo
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Archivo", menu=file_menu)
-        file_menu.add_command(label="Exportar Datos", command=self.export_to_csv)
-        file_menu.add_separator()
+        # file_menu.add_separator()
         file_menu.add_command(label="Salir", command=self.root.quit)
         
     def add_response(self, response):
@@ -954,118 +1239,6 @@ class McControlApp:
         self.response_text.insert(tk.END, f"[{timestamp}] {response}\n")
         self.response_text.see(tk.END)
 
-    def save_current_data(self):
-        """Guarda los datos actuales en la base de datos"""
-        if not self.sensor_data:
-            messagebox.showinfo("Sin Datos", "No hay datos para guardar")
-            return
-
-        try:
-            cursor = self.conn.cursor()
-            saved_count = 0
-
-            for data in self.sensor_data:
-                cursor.execute(
-                    """
-                    INSERT INTO sensor_readings 
-                    (timestamp, sensor_type, sensor_id, value, unit, metadata)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        data.get("timestamp", datetime.now().isoformat()),
-                        data.get("type", "unknown"),
-                        data.get("sensor_id", "unknown"),
-                        data.get("value", 0),
-                        data.get("unit", ""),
-                        json.dumps(data),
-                    ),
-                )
-                saved_count += 1
-
-            self.conn.commit()
-            messagebox.showinfo(
-                "Guardado Exitoso",
-                f"Se guardaron {saved_count} registros en la base de datos",
-            )
-
-            # Actualizar estadísticas y vista
-            self.update_db_stats()
-            self.load_recent_records()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al guardar datos: {str(e)}")
-
-    def export_to_csv(self):
-        """Exporta datos a archivo CSV"""
-
-        if not self.sensor_data:
-            messagebox.showinfo("Sin Datos", "No hay datos para exportar")
-            return
-
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-        )
-
-        if filename:
-            try:
-                with open(filename, "w", newline="", encoding="utf-8") as csvfile:
-                    fieldnames = ["timestamp", "sensor_id", "type", "value", "unit"]
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-                    writer.writeheader()
-                    for data in self.sensor_data:
-                        writer.writerow(
-                            {
-                                "timestamp": data.get("timestamp", ""),
-                                "sensor_id": data.get("sensor_id", ""),
-                                "type": data.get("type", ""),
-                                "value": data.get("value", ""),
-                                "unit": data.get("unit", ""),
-                            }
-                        )
-
-                messagebox.showinfo(
-                    "Exportación Exitosa", f"Datos exportados a {filename}"
-                )
-
-            except Exception as e:
-                messagebox.showerror("Error", f"Error al exportar datos: {str(e)}")
-
-    def clear_database(self):
-        """Limpia la base de datos"""
-        if messagebox.askyesno(
-            "Confirmar", "¿Está seguro de que desea limpiar toda la base de datos?"
-        ):
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("DELETE FROM sensor_readings")
-                cursor.execute("DELETE FROM communication_log")
-                self.conn.commit()
-
-                messagebox.showinfo(
-                    "Base de Datos Limpiada", "Todos los registros han sido eliminados"
-                )
-
-                # Actualizar vistas
-                self.update_db_stats()
-                self.load_recent_records()
-
-            except Exception as e:
-                messagebox.showerror(
-                    "Error", f"Error al limpiar base de datos: {str(e)}"
-                )
-
-    def update_db_stats(self):
-        """Actualiza las estadísticas de la base de datos"""
-        self.db["mc_registered"] = self.mc_registered
-        try:
-            with open(db_json, 'w', encoding='utf-8') as f:
-                json.dump(self.db, f, indent=4)
-        except AttributeError:
-            print("Error: self.db no está inicializado. Asegúrese de llamar a init_database primero.")
-        except Exception as e:
-            print(f"Error al escribir en '{db_json}': {e}")
 
 def main():
     """Función principal para ejecutar la aplicación"""

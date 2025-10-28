@@ -185,28 +185,38 @@ class McControlApp:
         )
 
     def rebuild_command_table(self):
-        """Reconstruye la tabla de comandos con el nuevo orden"""
+        """Reconstruye la tabla de comandos con el nuevo orden y carga last_state según MC seleccionado"""
         # Destruir todas las filas actuales
         for row_data in self.command_rows:
             row_data["frame"].destroy()
-
         self.command_rows.clear()
+
+        # Obtener el MC destino seleccionado
+        selected_mc_display = self.mc_var.get()
+        selected_mc = self.get_mac_from_selection(selected_mc_display) if selected_mc_display else None
+
+        # Buscar last_state del MC seleccionado
+        last_state = {}
+        for data in self.mc_registered.values():
+            if data.get("mac_destiny") == selected_mc:
+                last_state = data.get("last_state", {})
+                break
 
         # Recrear filas en el nuevo orden
         for idx, (cmd_name, cmd_config) in enumerate(self.command_configs.items()):
-            # Alternar color de fondo
             bg_color = "#f7f7f7" if idx % 2 == 0 else "#e3e3e3"
-
-            row_frame = tk.Frame(
-                self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color
-            )
+            row_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color)
             row_frame.pack(fill="x")
+
+            # Inicializar estado
+            self.commands_state[cmd_name] = {
+                "enabled": tk.BooleanVar(value=False),
+                "state": None,
+            }
 
             # Checkbox
             checkbox = tk.Checkbutton(
-                row_frame,
-                variable=self.commands_state[cmd_name]["enabled"],
-                bg=bg_color,
+                row_frame, variable=self.commands_state[cmd_name]["enabled"], bg=bg_color
             )
             checkbox.grid(row=0, column=0, padx=5)
 
@@ -215,29 +225,49 @@ class McControlApp:
                 row_frame, text=cmd_name, width=16, font=("Arial", 9), bg=bg_color
             ).grid(row=0, column=1)
 
-            # Botón ON
+            # Obtener llaves para los botones (por ejemplo: ["ON", "OFF"] o ["LOW", "HIGH"])
+            btn_keys = list(cmd_config.keys())
+            btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
+            btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
+
+            # Botón 1 (ON/LOW)
             on_btn = tk.Button(
                 row_frame,
-                text="ON",
+                text=btn1_text,
                 width=8,
                 bg="#e0e0e0",
-                command=lambda cmd=cmd_name: self.toggle_command_state(cmd, "ON"),
+                command=lambda cmd=cmd_name, state=btn1_text: self.toggle_command_state(cmd, state),
             )
             on_btn.grid(row=0, column=2, padx=2, pady=2)
 
-            # Botón OFF
+            # Botón 2 (OFF/HIGH)
             off_btn = tk.Button(
                 row_frame,
-                text="OFF",
+                text=btn2_text,
                 width=8,
                 bg="#e0e0e0",
-                command=lambda cmd=cmd_name: self.toggle_command_state(cmd, "OFF"),
+                command=lambda cmd=cmd_name, state=btn2_text: self.toggle_command_state(cmd, state),
             )
             off_btn.grid(row=0, column=3, padx=2, pady=2)
 
-            # Actualizar referencias
+            # Guardar referencias de botones
             self.commands_state[cmd_name]["on_btn"] = on_btn
             self.commands_state[cmd_name]["off_btn"] = off_btn
+
+            # Cargar estado guardado si existe
+            saved_state = last_state.get(cmd_name)
+            if saved_state == btn1_text:
+                self.commands_state[cmd_name]["state"] = btn1_text
+                on_btn.config(bg="#27ae60", relief="sunken")
+                off_btn.config(bg="#e0e0e0", relief="raised")
+            elif saved_state == btn2_text:
+                self.commands_state[cmd_name]["state"] = btn2_text
+                off_btn.config(bg="#e74c3c", relief="sunken")
+                on_btn.config(bg="#e0e0e0", relief="raised")
+            else:
+                # Ningún estado guardado
+                on_btn.config(bg="#e0e0e0", relief="raised")
+                off_btn.config(bg="#e0e0e0", relief="raised")
 
             # Guardar referencia de la fila
             self.command_rows.append({"frame": row_frame, "cmd_name": cmd_name})
@@ -591,7 +621,7 @@ class McControlApp:
         # Scroll con rueda del mouse
         def _on_mousewheel(event):
             # Windows y macOS usan event.delta, Linux usa event.num
-            if hasattr(event, 'delta'):
+            if hasattr(event, "delta"):
                 if event.delta > 0:
                     canvas.yview_scroll(-1, "units")
                 elif event.delta < 0:
@@ -602,10 +632,9 @@ class McControlApp:
                 elif event.num == 5:
                     canvas.yview_scroll(1, "units")
 
-
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)    # Windows/macOS
-        canvas.bind_all("<Button-4>", _on_mousewheel)      # Linux scroll up
-        canvas.bind_all("<Button-5>", _on_mousewheel)      # Linux scroll down
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows/macOS
+        canvas.bind_all("<Button-4>", _on_mousewheel)  # Linux scroll up
+        canvas.bind_all("<Button-5>", _on_mousewheel)  # Linux scroll down
 
         # Select MC Destino (arriba de ambos frames)
         mc_select_frame = tk.Frame(scrollable_frame)
@@ -628,18 +657,22 @@ class McControlApp:
         )
         self.mc_combo.pack(side="left")
         self.mc_combo.set("Seleccione MC...")
+        self.mc_combo.bind("<<ComboboxSelected>>", lambda e: self.rebuild_command_table())
 
-        # Formulario X_02_TestTrigger y Controles
-        test_trigger_container = tk.Frame(scrollable_frame)
-        test_trigger_container.pack(fill="x", padx=10, pady=5)
+        # Contenedor principal para la zona de formularios y la tabla de comandos
+        main_row_container = tk.Frame(scrollable_frame)
+        main_row_container.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Frame izquierdo: X_02_TestTrigger
-        form_frame = tk.LabelFrame(test_trigger_container, text="X_02_TestTrigger")
-        form_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        # Frame izquierdo: contendrá ambos formularios uno sobre otro
+        forms_left_frame = tk.Frame(main_row_container)
+        forms_left_frame.pack(side="left", fill="both", expand=True)
 
-        # Container del formulario
+        # Frame para X_02_TestTrigger (mitad superior)
+        form_frame = tk.LabelFrame(forms_left_frame, text="X_02_TestTrigger")
+        form_frame.pack(fill="both", expand=True, padx=(0, 5), pady=(0, 2))
+
         form_container = tk.Frame(form_frame)
-        form_container.pack(fill="x", padx=10, pady=10)
+        form_container.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Fila 1: Número de ejecuciones
         executions_row = tk.Frame(form_container)
@@ -719,16 +752,12 @@ class McControlApp:
         # ============================================
         # NUEVO: Formulario X_03_RO_Single
         # ============================================
-        ro_single_container = tk.Frame(scrollable_frame)
-        ro_single_container.pack(fill="x", padx=10, pady=5)
+        # Frame para X_03_RO_Single (mitad inferior)
+        ro_single_frame = tk.LabelFrame(forms_left_frame, text="X_03_RO_Single")
+        ro_single_frame.pack(fill="both", expand=True, padx=(0, 5), pady=(2, 0))
 
-        # Frame para X_03_RO_Single (lado izquierdo, mismo ancho que TestTrigger)
-        ro_single_frame = tk.LabelFrame(ro_single_container, text="X_03_RO_Single")
-        ro_single_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
-
-        # Container del formulario
         ro_single_form_container = tk.Frame(ro_single_frame)
-        ro_single_form_container.pack(fill="x", padx=10, pady=10)
+        ro_single_form_container.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Fila 1: Número de ejecuciones
         ro_executions_row = tk.Frame(ro_single_form_container)
@@ -808,10 +837,10 @@ class McControlApp:
         send_ro_form_btn.pack()
 
         # Frame derecho: Comandos
-        controls_frame = tk.LabelFrame(test_trigger_container, text="Comandos")
+        controls_frame = tk.LabelFrame(main_row_container, text="Comandos")
         controls_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
-        # Container principal
+        # Container principal de la tabla y controles
         commands_main_container = tk.Frame(controls_frame)
         commands_main_container.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -853,9 +882,9 @@ class McControlApp:
             header_frame, text="Comando", width=20, font=("Arial", 8, "bold")
         ).grid(row=0, column=1)
         tk.Label(
-            header_frame, text="Encender", width=14, font=("Arial", 8, "bold")
+            header_frame, text="ON/HIGH/GLOBAL", width=15, font=("Arial", 8, "bold"), padx=10
         ).grid(row=0, column=2)
-        tk.Label(header_frame, text="Apagar", width=14, font=("Arial", 8, "bold")).grid(
+        tk.Label(header_frame, text="OFF/LOW/LOCAL", width=16, font=("Arial", 8, "bold")).grid(
             row=0, column=3
         )
 
@@ -874,17 +903,14 @@ class McControlApp:
             },
             "Analog Buck": {"ON": "X_26_PwrEN_2V4D_ON", "OFF": "X_27_PwrEN_2V4D_OFF"},
             "3V1 Buck": {"ON": "X_28_PwrEN_3V1_ON", "OFF": "X_29_PwrEN_3V1_OFF"},
-            "Analog LDO": {
-            "ON": "X_2A_PwrEN_1V8A_ON", "OFF": "X_2B_PwrEN_1V8A_OFF"
-            },
-            # "Fan Speed 0": {
-            # "ON": "X_E0_FanSpeed0_Low", "OFF": "X_E1_FanSpeed0_High"
-
-            # }
-    #             "": b"\xe0",
-    # "X_E1_FanSpeed0_High": b"\xe1",
-    # "X_E2_FanSpeed1_Low": b"\xe2",
-    # "X_E3_FanSpeed1_High": b"\xe3",
+            "Analog LDO": {"ON": "X_2A_PwrEN_1V8A_ON", "OFF": "X_2B_PwrEN_1V8A_OFF"},
+            "Fan Speed 0": {
+            "HIGH": "X_E1_FanSpeed0_High", "LOW": "X_E0_FanSpeed0_Low"
+            }
+            #             "": b"\xe0",
+            # "X_E1_FanSpeed0_High": b"\xe1",
+            # "X_E2_FanSpeed1_Low": b"\xe2",
+            # "X_E3_FanSpeed1_High": b"\xe3",
         }
 
         # Estado de comandos: {comando: {"enabled": bool, "state": "ON"/"OFF"/None}}
@@ -918,23 +944,28 @@ class McControlApp:
                 row_frame, text=cmd_name, width=16, font=("Arial", 9), bg="white"
             ).grid(row=0, column=1)
 
-            # Botón ON
+            # Obtener llaves para los botones (por ejemplo: ["ON", "OFF"] o ["LOW", "HIGH"])
+            btn_keys = list(cmd_config.keys())
+            btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
+            btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
+
+            # Botón 1 (ON/LOW)
             on_btn = tk.Button(
                 row_frame,
-                text="ON",
+                text=btn1_text,
                 width=8,
                 bg="#e0e0e0",
-                command=lambda cmd=cmd_name: self.toggle_command_state(cmd, "ON"),
+                command=lambda cmd=cmd_name, state=btn1_text: self.toggle_command_state(cmd, state),
             )
             on_btn.grid(row=0, column=2, padx=2, pady=2)
 
-            # Botón OFF
+            # Botón 2 (OFF/HIGH)
             off_btn = tk.Button(
                 row_frame,
-                text="OFF",
+                text=btn2_text,
                 width=8,
                 bg="#e0e0e0",
-                command=lambda cmd=cmd_name: self.toggle_command_state(cmd, "OFF"),
+                command=lambda cmd=cmd_name, state=btn2_text: self.toggle_command_state(cmd, state),
             )
             off_btn.grid(row=0, column=3, padx=2, pady=2)
 

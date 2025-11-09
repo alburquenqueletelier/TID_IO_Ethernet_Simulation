@@ -186,6 +186,14 @@ class McControlApp:
 
     def rebuild_command_table(self):
         """Reconstruye la tabla de comandos con el nuevo orden y carga last_state según MC seleccionado"""
+        # Guardar estado actual de comandos antes de destruir filas
+        prev_states = {}
+        for cmd_name, cmd_state in self.commands_state.items():
+            prev_states[cmd_name] = {
+                "enabled": cmd_state["enabled"].get() if "enabled" in cmd_state else False,
+                "state": cmd_state.get("state"),
+            }
+
         # Destruir todas las filas actuales
         for row_data in self.command_rows:
             row_data["frame"].destroy()
@@ -204,14 +212,17 @@ class McControlApp:
 
         # Recrear filas en el nuevo orden
         for idx, (cmd_name, cmd_config) in enumerate(self.command_configs.items()):
-            bg_color = "#f7f7f7" if idx % 2 == 0 else "#e3e3e3"
+            bg_color = "#f7f7f7" #if idx % 2 == 0 else "#e3e3e3"
             row_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color)
             row_frame.pack(fill="x")
 
-            # Inicializar estado
+            # Restaurar estado si existe, sino inicializar
+            enabled_val = prev_states.get(cmd_name, {}).get("enabled", False)
+            state_val = prev_states.get(cmd_name, {}).get("state", None)
+
             self.commands_state[cmd_name] = {
-                "enabled": tk.BooleanVar(value=False),
-                "state": None,
+                "enabled": tk.BooleanVar(value=enabled_val),
+                "state": state_val,
             }
 
             # Checkbox
@@ -222,7 +233,7 @@ class McControlApp:
 
             # Nombre del comando
             tk.Label(
-                row_frame, text=cmd_name, width=16, font=("Arial", 9), bg=bg_color
+                row_frame, text=cmd_name, width=48, font=("Arial", 9), bg=bg_color
             ).grid(row=0, column=1)
 
             # Obtener llaves para los botones (por ejemplo: ["ON", "OFF"] o ["LOW", "HIGH"])
@@ -250,12 +261,26 @@ class McControlApp:
             )
             off_btn.grid(row=0, column=3, padx=2, pady=2)
 
+            # Columna vacía para separación
+            tk.Label(row_frame, text="", width=2, bg=bg_color).grid(row=0, column=4)
+
+            # Botón de basurero (al final de la fila)
+            trash_btn = tk.Button(
+                row_frame,
+                text="🗑️",
+                width=3,
+                bg="#f7f7f7",
+                relief="flat",
+                command=lambda: None  # Por ahora no hace nada
+            )
+            trash_btn.grid(row=0, column=5, padx=5)
+
             # Guardar referencias de botones
             self.commands_state[cmd_name]["on_btn"] = on_btn
             self.commands_state[cmd_name]["off_btn"] = off_btn
 
-            # Cargar estado guardado si existe
-            saved_state = last_state.get(cmd_name)
+            # Cargar estado guardado si existe (last_state o estado previo)
+            saved_state = state_val if state_val else last_state.get(cmd_name)
             if saved_state == btn1_text:
                 self.commands_state[cmd_name]["state"] = btn1_text
                 on_btn.config(bg="#27ae60", relief="sunken")
@@ -875,11 +900,23 @@ class McControlApp:
         header_frame = tk.Frame(table_frame, relief="ridge", borderwidth=1)
         header_frame.pack(fill="x")
 
-        tk.Label(header_frame, text="", width=5, font=("Arial", 8, "bold")).grid(
-            row=0, column=0
+        # Checkbox "Seleccionar todo"
+        def toggle_all_commands():
+            value = select_all_cb_var.get()
+            for cmd_state in self.commands_state.values():
+                cmd_state["enabled"].set(value)
+
+        select_all_cb_var = tk.BooleanVar(value=False)
+        select_all_cb = tk.Checkbutton(
+            header_frame,
+            variable=select_all_cb_var,
+            command=toggle_all_commands,
+            width=2
         )
+        select_all_cb.grid(row=0, column=0, padx=1, pady=2)
+
         tk.Label(
-            header_frame, text="Comando", width=20, font=("Arial", 8, "bold")
+            header_frame, text="Comando", width=54, font=("Arial", 8, "bold")
         ).grid(row=0, column=1)
         tk.Label(
             header_frame, text="ON/HIGH/GLOBAL", width=15, font=("Arial", 8, "bold"), padx=10
@@ -890,27 +927,26 @@ class McControlApp:
 
         # Definir comandos con sus appendix
         self.command_configs = {
-            "ReadOut": {"ON": "X_04_RO_ON", "OFF": "X_05_RO_OFF"},
-            "Diagnosis": {"ON": "X_08_DIAG_", "OFF": "X_09_DIAG_DIS"},
-            "TestTrigger Auto": {
+            "X_04_RO_ON | X_05_RO_OFF": {"ON": "X_04_RO_ON", "OFF": "X_05_RO_OFF"},
+            "X_08_DIAG_ | X_09_DIAG_DIS": {"ON": "X_08_DIAG_", "OFF": "X_09_DIAG_DIS"},
+            "X_FB_TTrig_Auto_EN | X_FC_TTrig_Auto_DIS": {
                 "ON": "X_FB_TTrig_Auto_EN",
                 "OFF": "X_FC_TTrig_Auto_DIS",
             },
-            "PETA8s Top": {"ON": "X_20_PwrDwnb_TOP_ON", "OFF": "X_21_PwrDwnb_TOP_OFF"},
-            "PETAS8s Bottom": {
+            "X_20_PwrDwnb_TOP_ON | X_21_PwrDwnb_TOP_OFF": {"ON": "X_20_PwrDwnb_TOP_ON", "OFF": "X_21_PwrDwnb_TOP_OFF"},
+            "X_22_PwrDwnb_BOT_ON | X_23_PwrDwnb_BOT_OFF": {
                 "ON": "X_22_PwrDwnb_BOT_ON",
                 "OFF": "X_23_PwrDwnb_BOT_OFF",
             },
-            "Analog Buck": {"ON": "X_26_PwrEN_2V4D_ON", "OFF": "X_27_PwrEN_2V4D_OFF"},
-            "3V1 Buck": {"ON": "X_28_PwrEN_3V1_ON", "OFF": "X_29_PwrEN_3V1_OFF"},
-            "Analog LDO": {"ON": "X_2A_PwrEN_1V8A_ON", "OFF": "X_2B_PwrEN_1V8A_OFF"},
-            "Fan Speed 0": {
+            "X_26_PwrEN_2V4D_ON | X_27_PwrEN_2V4D_OFF": {"ON": "X_26_PwrEN_2V4D_ON", "OFF": "X_27_PwrEN_2V4D_OFF"},
+            "X_28_PwrEN_3V1_ON | X_29_PwrEN_3V1_OFF": {"ON": "X_28_PwrEN_3V1_ON", "OFF": "X_29_PwrEN_3V1_OFF"},
+            "X_2A_PwrEN_1V8A_ON | X_2B_PwrEN_1V8A_OFF": {"ON": "X_2A_PwrEN_1V8A_ON", "OFF": "X_2B_PwrEN_1V8A_OFF"},
+            "X_E1_FanSpeed0_High | X_E0_FanSpeed0_Low": {
             "HIGH": "X_E1_FanSpeed0_High", "LOW": "X_E0_FanSpeed0_Low"
-            }
-            #             "": b"\xe0",
-            # "X_E1_FanSpeed0_High": b"\xe1",
-            # "X_E2_FanSpeed1_Low": b"\xe2",
-            # "X_E3_FanSpeed1_High": b"\xe3",
+            },
+            "X_F9_TTrig_Global | X_FA_TTrig_Local": {"GLOBAL": "X_F9_TTrig_Global", "LOCAL": "X_FA_TTrig_Local"},
+            "X_E1_FanSpeed0_High | X_E0_FanSpeed0_Low": {"HIGH": "X_E1_FanSpeed0_High", "LOW": "X_E0_FanSpeed0_Low"},
+            "X_E3_FanSpeed1_High | X_E2_FanSpeed1_Low": {"HIGH": "X_E3_FanSpeed1_High", "LOW": "X_E2_FanSpeed1_Low"},
         }
 
         # Estado de comandos: {comando: {"enabled": bool, "state": "ON"/"OFF"/None}}
@@ -941,7 +977,7 @@ class McControlApp:
 
             # Nombre del comando
             tk.Label(
-                row_frame, text=cmd_name, width=16, font=("Arial", 9), bg="white"
+                row_frame, text=cmd_name, width=48, font=("Arial", 9), bg="white"
             ).grid(row=0, column=1)
 
             # Obtener llaves para los botones (por ejemplo: ["ON", "OFF"] o ["LOW", "HIGH"])
@@ -969,6 +1005,20 @@ class McControlApp:
             )
             off_btn.grid(row=0, column=3, padx=2, pady=2)
 
+            # Columna vacía para separación
+            tk.Label(row_frame, text="", width=2, bg="white").grid(row=0, column=4)
+
+            # Botón de basurero (al final de la fila)
+            trash_btn = tk.Button(
+                row_frame,
+                text="🗑️",
+                width=3,
+                bg="#f7f7f7",
+                relief="flat",
+                command=lambda: None  # Por ahora no hace nada
+            )
+            trash_btn.grid(row=0, column=5, padx=5)
+
             # Guardar referencias de botones
             self.commands_state[cmd_name]["on_btn"] = on_btn
             self.commands_state[cmd_name]["off_btn"] = off_btn
@@ -978,6 +1028,18 @@ class McControlApp:
 
             # Setup drag and drop
             self.setup_drag_and_drop(row_frame, cmd_name)
+
+        self.show_summary_var = tk.BooleanVar(value=False)
+        summary_frame = tk.Frame(commands_main_container)
+        summary_frame.pack(fill="x", pady=(10, 0))
+
+        summary_checkbox = tk.Checkbutton(
+            summary_frame,
+            text="Ventana Resumen",
+            variable=self.show_summary_var,
+            font=("Arial", 9),
+        )
+        summary_checkbox.pack(side="left", padx=(0, 10))
 
         # Botón enviar comandos
         send_commands_btn = tk.Button(
@@ -1123,147 +1185,6 @@ class McControlApp:
                 threading.Thread(target=process_form, daemon=True).start()
                 self.add_response(f"→ Ejecución {i+1}/{num_executions}")
 
-    def toggle_switch(self, switch_name):
-        """Maneja el cambio de estado de los switches con estado de carga"""
-
-        # Obtener el estado actual
-        is_on = self.switch_states[switch_name].get()
-
-        # Obtener label de estado
-        state_label_name = f"{switch_name.lower().replace(' ', '_')}_state_label"
-        state_label = getattr(self, state_label_name, None)
-
-        if not state_label:
-            return
-
-        # Mostrar estado "Cargando..."
-        state_label.config(text="Cargando...", fg="orange")
-        self.add_response(f"⏳ {switch_name} - Ejecutandose...")
-
-        # Simular delay de comunicación con FPGA en thread separado
-        def process_switch():
-            # Enviar comando al MC
-            self.send_toggle_switch_command(switch_name, is_on)
-
-            time.sleep(1)  # Simular delay de respuesta
-
-            # Actualizar interfaz en el thread principal
-            self.root.after(
-                0, lambda: self.update_switch_state(switch_name, is_on, state_label)
-            )
-
-        # Ejecutar en thread para no bloquear la UI
-        threading.Thread(target=process_switch, daemon=True).start()
-
-    def send_toggle_switch_command(self, switch_name, state):
-        """
-        Crea y envía el paquete de comando para el switch
-
-        Formato del paquete:
-        - 6 bytes: MAC destino
-        - 6 bytes: MAC origen
-        - 2 bytes: Largo del paquete
-        - 4 bytes: 0x00 (reservados)
-        - 2 bytes: 0x02 0x03 (constantes)
-        - 1 byte: Apéndice (comando específico)
-        """
-
-        # Obtener MAC destino seleccionado
-        selected_mc_display = self.mc_var.get()
-        mac_destino = self.get_mac_from_selection(selected_mc_display)
-
-        if not mac_destino:
-            print("Error: No hay MC destino seleccionado")
-            self.add_response("Error: Seleccione un MC destino")
-            return None
-
-        # Obtener MAC origen (del host hacia el MC)
-        mac_origen = None
-        for mac_src, data in self.mc_registered.items():
-            if data.get("mac_destiny") == mac_destino:
-                mac_origen = mac_src
-                break
-
-        if not mac_origen:
-            print("Error: No se encontró MAC origen para el MC seleccionado")
-            self.add_response("Error: MC no está registrado correctamente")
-            return None
-
-        # Determinar apéndice según switch y estado
-        appendix_map = {
-            "ReadOut": {
-                True: appendix_dict.get("X_04_RO_ON"),
-                False: appendix_dict.get("X_05_RO_OFF"),
-            },
-            "Diagnosis": {
-                True: appendix_dict.get("X_08_DIAG_"),
-                False: appendix_dict.get("X_09_DIAG_DIS"),
-            },
-        }
-
-        appendix = appendix_map.get(switch_name, {}).get(state)
-
-        # Construir el paquete
-        try:
-            # Convertir MACs de string a bytes
-            mac_destino_bytes = bytes.fromhex(mac_destino.replace(":", ""))
-            mac_origen_bytes = bytes.fromhex(mac_origen.replace(":", ""))
-
-            # Largo del payload (4 bytes ceros + 2 bytes identificador + 1 byte apéndice = 7 bytes)
-            payload_length = 7  # TODO: se debe calcular para apendice CPU.
-            length_bytes = payload_length.to_bytes(
-                2, byteorder="big"
-            )  # big indian order (byte más significativo primero)
-
-            # 4 bytes en 0
-            padding_bytes = b"\x00\x00\x00\x00"
-
-            # 2 bytes identificador
-            constant_bytes = b"\x02\x03"
-
-            # Construir paquete completo
-            packet = (
-                mac_destino_bytes  # 6 bytes
-                + mac_origen_bytes  # 6 bytes
-                + length_bytes  # 2 bytes
-                + padding_bytes  # 4 bytes
-                + constant_bytes  # 2 bytes
-                + appendix  # 1 byte
-            )
-
-            packet_hex = packet.hex(":")
-            self.add_response(f"Paquete {switch_name}: {packet_hex}")
-
-            interface = self.mc_registered.get(mac_origen)["interface_destiny"]
-
-            if not interface:
-                print(f"Error: Interfaz no encontrada para MAC origen {mac_origen}")
-                self.add_response("Error: Interfaz de envío no encontrada")
-                return None
-
-            # Log del paquete
-            print(f"\n--- Paquete {switch_name} ({'ON' if state else 'OFF'}) ---")
-            print(f"MAC Destino:    {mac_destino}")
-            print(f"MAC Origen:     {mac_origen}")
-            print(f"Largo (Type):   {payload_length} bytes")
-            print(f"Apéndice:       {appendix.hex()}")
-            print(f"Paquete completo: {packet_hex}")
-            print(f"Total bytes:    {len(packet)}")
-
-            # Envío del paquete raw a nivel de Capa 2 (Ethernet)
-            # sendp() necesita un objeto de paquete de Scapy (Ether, Raw, etc.)
-            # Para enviar los bytes exactos incluyendo la cabecera L2:
-            scapy_packet = Raw(load=packet)
-            sendp(scapy_packet, iface=interface, verbose=False)
-            self.add_response(f"Comando enviado a través de {interface}")
-
-            return packet  # Retornar los bytes del paquete
-
-        except Exception as e:
-            print(f"Error construyendo paquete: {e}")
-            self.add_response(f"Error: {str(e)}")
-            return None
-
     def update_switch_state(self, switch_name, is_on, state_label):
         """Actualiza el estado final del switch después del delay"""
         if is_on:
@@ -1352,17 +1273,22 @@ class McControlApp:
         cmd_list = "\n".join(
             [f"  • {c['name']}: {c['state']}" for c in commands_to_send]
         )
-        info_msg = f"""
+        # Confirmación solo si el checkbox está marcado
+        if self.show_summary_var.get():
+            cmd_list = "\n".join(
+                [f"  • {c['name']}: {c['state']}" for c in commands_to_send]
+            )
+            info_msg = f"""
     Se enviarán {len(commands_to_send)} comando(s):
     {cmd_list}
 
     Delta de tiempo: {delta_time}s
     MC Destino: {selected_mc}
     Interfaz: {interface}
-        """.strip()
+            """.strip()
 
-        if not messagebox.askyesno("Confirmar Envío", info_msg):
-            return
+            if not messagebox.askyesno("Ventana Resumen", info_msg):
+                return
 
         self.add_response("=" * 50)
         self.add_response(f"📡 Enviando {len(commands_to_send)} comando(s)")

@@ -63,7 +63,7 @@ class McControlApp:
         self.mc_available = {}  # keys: mac_source, values: interfaces
         self.mc_registered = (
             {}
-        )  # keys: mac_source, values: dict {  mac_destiny, interface_destiny, label}
+        )  # keys: mac_source, values: dict {  mac_destiny, interface_destiny, label, last_state{} }
         self.frames_sent = 0
         self.frames_received = 0
 
@@ -154,10 +154,22 @@ class McControlApp:
 
     def reorder_commands(self, source_cmd, target_cmd):
         """Reordena los comandos en la lista y actualiza la UI"""
-        # Encontrar índices
+        selected_mc_display = self.mc_var.get()
+        selected_mc = self.get_mac_from_selection(selected_mc_display) if selected_mc_display else None
+
+        # Buscar el MC seleccionado
+        mc_data = None
+        for data in self.mc_registered.values():
+            if data.get("mac_destiny") == selected_mc:
+                mc_data = data
+                break
+
+        if not mc_data:
+            return
+
+        # Reordenar en la lista visual
         source_idx = None
         target_idx = None
-
         for i, row_data in enumerate(self.command_rows):
             if row_data["cmd_name"] == source_cmd:
                 source_idx = i
@@ -167,19 +179,17 @@ class McControlApp:
         if source_idx is None or target_idx is None:
             return
 
-        # Reordenar en la lista
         item = self.command_rows.pop(source_idx)
         self.command_rows.insert(target_idx, item)
 
-        # Reordenar también en command_configs para mantener consistencia
-        configs_list = list(self.command_configs.items())
+        # Reordenar también en el MC específico
+        configs_list = list(mc_data["command_configs"].items())
         config_item = configs_list.pop(source_idx)
         configs_list.insert(target_idx, config_item)
-        self.command_configs = dict(configs_list)
+        mc_data["command_configs"] = dict(configs_list)
 
         # Actualizar la UI
         self.rebuild_command_table()
-
         self.add_response(
             f"✓ Orden actualizado: {source_cmd} movido a posición de {target_cmd}"
         )
@@ -203,22 +213,45 @@ class McControlApp:
         selected_mc_display = self.mc_var.get()
         selected_mc = self.get_mac_from_selection(selected_mc_display) if selected_mc_display else None
 
-        # Buscar last_state del MC seleccionado
-        last_state = {}
+        # TODO: mejorar búsqueda por id O(1) en lugar de O(n)
+        # Buscar el MC seleccionado y su orden de comandos
+        mc_data = None
         for data in self.mc_registered.values():
             if data.get("mac_destiny") == selected_mc:
-                last_state = data.get("last_state", {})
+                mc_data = data
                 break
 
+        # Cargar delta_time si existe en el MC
+        if mc_data and "delta_time" in mc_data:
+            self.delta_time_var.set(mc_data["delta_time"])
+        else:
+            self.delta_time_var.set(0.5)
+
+        # Solo usar los comandos del MC, si no tiene, tabla vacía
+        command_configs = mc_data.get("command_configs", {}) if mc_data else {}
+        last_state = mc_data.get("last_state", {}) if mc_data else {}
+
+        # Limpiar tabla
+        for row_data in self.command_rows:
+            row_data["frame"].destroy()
+        self.command_rows.clear()
+
+        # Si no hay comandos, no mostrar filas
+        if not command_configs:
+            return
+
         # Recrear filas en el nuevo orden
-        for idx, (cmd_name, cmd_config) in enumerate(self.command_configs.items()):
+        for idx, (cmd_name, cmd_config) in enumerate(command_configs.items()):
+            if cmd_name not in last_state:
+                continue 
+
             bg_color = "#f7f7f7" #if idx % 2 == 0 else "#e3e3e3"
             row_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color)
             row_frame.pack(fill="x")
 
             # Restaurar estado si existe, sino inicializar
-            enabled_val = prev_states.get(cmd_name, {}).get("enabled", False)
-            state_val = prev_states.get(cmd_name, {}).get("state", None)
+            state_val = last_state.get(cmd_name, None)
+            enabled_val = bool(state_val)
 
             self.commands_state[cmd_name] = {
                 "enabled": tk.BooleanVar(value=enabled_val),
@@ -241,7 +274,6 @@ class McControlApp:
             btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
             btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
 
-            # Botón 1 (ON/LOW)
             on_btn = tk.Button(
                 row_frame,
                 text=btn1_text,
@@ -251,7 +283,6 @@ class McControlApp:
             )
             on_btn.grid(row=0, column=2, padx=2, pady=2)
 
-            # Botón 2 (OFF/HIGH)
             off_btn = tk.Button(
                 row_frame,
                 text=btn2_text,
@@ -261,43 +292,24 @@ class McControlApp:
             )
             off_btn.grid(row=0, column=3, padx=2, pady=2)
 
-            # Columna vacía para separación
-            tk.Label(row_frame, text="", width=2, bg=bg_color).grid(row=0, column=4)
-
-            # Botón de basurero (al final de la fila)
-            trash_btn = tk.Button(
-                row_frame,
-                text="🗑️",
-                width=3,
-                bg="#f7f7f7",
-                relief="flat",
-                command=lambda: None  # Por ahora no hace nada
-            )
-            trash_btn.grid(row=0, column=5, padx=5)
-
             # Guardar referencias de botones
             self.commands_state[cmd_name]["on_btn"] = on_btn
             self.commands_state[cmd_name]["off_btn"] = off_btn
 
-            # Cargar estado guardado si existe (last_state o estado previo)
-            saved_state = state_val if state_val else last_state.get(cmd_name)
-            if saved_state == btn1_text:
+            # Cargar estado guardado si existe (last_state)
+            if state_val == btn1_text:
                 self.commands_state[cmd_name]["state"] = btn1_text
                 on_btn.config(bg="#27ae60", relief="sunken")
                 off_btn.config(bg="#e0e0e0", relief="raised")
-            elif saved_state == btn2_text:
+            elif state_val == btn2_text:
                 self.commands_state[cmd_name]["state"] = btn2_text
                 off_btn.config(bg="#e74c3c", relief="sunken")
                 on_btn.config(bg="#e0e0e0", relief="raised")
             else:
-                # Ningún estado guardado
                 on_btn.config(bg="#e0e0e0", relief="raised")
                 off_btn.config(bg="#e0e0e0", relief="raised")
 
-            # Guardar referencia de la fila
             self.command_rows.append({"frame": row_frame, "cmd_name": cmd_name})
-
-            # Setup drag and drop
             self.setup_drag_and_drop(row_frame, cmd_name)
 
     def init_database(self):
@@ -892,6 +904,16 @@ class McControlApp:
         )
         delta_time_spinbox.pack(side="left", padx=(5, 0))
 
+        # Botón "Gestionar Comandos"
+        add_command_btn = tk.Button(
+            delta_time_frame,
+            text="Gestionar Comandos",
+            font=("Arial", 9, "bold"),
+            bg="#f1c40f",
+            command=self.open_add_command_modal
+        )
+        add_command_btn.pack(side="right", padx=(10, 0))
+
         # Tabla de comandos
         table_frame = tk.Frame(commands_main_container)
         table_frame.pack(fill="both", expand=True)
@@ -1005,20 +1027,6 @@ class McControlApp:
             )
             off_btn.grid(row=0, column=3, padx=2, pady=2)
 
-            # Columna vacía para separación
-            tk.Label(row_frame, text="", width=2, bg="white").grid(row=0, column=4)
-
-            # Botón de basurero (al final de la fila)
-            trash_btn = tk.Button(
-                row_frame,
-                text="🗑️",
-                width=3,
-                bg="#f7f7f7",
-                relief="flat",
-                command=lambda: None  # Por ahora no hace nada
-            )
-            trash_btn.grid(row=0, column=5, padx=5)
-
             # Guardar referencias de botones
             self.commands_state[cmd_name]["on_btn"] = on_btn
             self.commands_state[cmd_name]["off_btn"] = off_btn
@@ -1044,7 +1052,7 @@ class McControlApp:
         # Botón enviar comandos
         send_commands_btn = tk.Button(
             commands_main_container,
-            text="📤 Enviar Comandos Seleccionados",
+            text="Enviar Comandos",
             command=self.send_selected_commands,
             font=("Arial", 10, "bold"),
             bg="#3498db",
@@ -1065,6 +1073,108 @@ class McControlApp:
         menubar.add_cascade(label="Archivo", menu=file_menu)
         file_menu.add_separator()
         file_menu.add_command(label="Salir", command=self.root.quit)
+
+    def open_add_command_modal(self):
+        """Abre un modal para agregar comandos"""
+        selected_mc_display = self.mc_var.get()
+        selected_mc = self.get_mac_from_selection(selected_mc_display)
+        if not selected_mc:
+            messagebox.showwarning("Validación", "Debe seleccionar un Micro Controlador para gestionar comandos.")
+            return
+
+        # Buscar el MC seleccionado
+        mc_key = None
+        mc_data = None
+        for key, data in self.mc_registered.items():
+            if data.get("mac_destiny") == selected_mc:
+                mc_key = key
+                mc_data = data
+                break
+        if not mc_data:
+            messagebox.showwarning("Validación", "Micro Controlador no encontrado.")
+            return
+
+        # Universo de comandos
+        all_commands = list(self.command_configs.keys())
+        current_commands = set(mc_data.get("command_configs", {}).keys())
+
+        modal = tk.Toplevel(self.root)
+        modal.title("Gestionar Comandos")
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.geometry("400x520")
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+
+        # Centrar modal en pantalla
+        modal.update_idletasks()
+        x = (modal.winfo_screenwidth() // 2) - (400 // 2)
+        y = (modal.winfo_screenheight() // 2) - (520 // 2)
+        modal.geometry(f"+{x}+{y}")
+
+        tk.Label(modal, text="Gestionar comandos del microcontrolador", font=("Arial", 12, "bold"), bg="#f7f7f7").pack(pady=(20, 10))
+
+        cb_frame = tk.Frame(modal, bg="#f7f7f7")
+        cb_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # Variables para los checkboxes
+        command_vars = {}
+        for cmd_name in all_commands:
+            var = tk.BooleanVar(value=cmd_name in current_commands)
+            command_vars[cmd_name] = var
+
+        # Checkbox seleccionar/deseleccionar todos
+        select_all_var = tk.BooleanVar(value=False)
+        def toggle_all():
+            value = select_all_var.get()
+            for var in command_vars.values():
+                var.set(value)
+
+        select_all_cb = tk.Checkbutton(
+            cb_frame,
+            text="Seleccionar/Deseleccionar todos",
+            variable=select_all_var,
+            command=toggle_all,
+            anchor="w",
+            bg="#f7f7f7",
+            font=("Arial", 10, "bold")
+        )
+        select_all_cb.pack(fill="x", pady=(0, 8))
+
+        # Listado de comandos con checkboxes
+        for cmd_name in all_commands:
+            cb = tk.Checkbutton(cb_frame, text=cmd_name, variable=command_vars[cmd_name], anchor="w", bg="#f7f7f7")
+            cb.pack(fill="x", pady=2)
+
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(fill="x", pady=(20, 20))
+
+        def aceptar():
+            selected_cmds = [cmd for cmd, var in command_vars.items() if var.get()]
+            current_order = list(mc_data.get("command_configs", {}).keys())
+            new_order = [cmd for cmd in current_order if cmd in selected_cmds]
+            nuevos = [cmd for cmd in selected_cmds if cmd not in current_order]
+            new_order.extend(nuevos)
+            new_command_configs = {cmd: self.command_configs[cmd] for cmd in new_order}
+            mc_data["command_configs"] = new_command_configs
+
+            last_state = mc_data.get("last_state", {})
+            for cmd in nuevos:
+                last_state[cmd] = ""
+            for cmd in list(last_state.keys()):
+                if cmd not in new_order:
+                    del last_state[cmd]
+            mc_data["last_state"] = last_state
+
+            self.update_db_stats()
+            self.rebuild_command_table()
+            modal.destroy()
+
+        agregar_btn = tk.Button(btn_frame, text="Agregar", font=("Arial", 10, "bold"), bg="#27ae60", fg="white", command=aceptar)
+        agregar_btn.pack(side="left", padx=(40, 10), ipadx=10)
+
+        cancelar_btn = tk.Button(btn_frame, text="Cancelar", font=("Arial", 10, "bold"), bg="#e74c3c", fg="white", command=modal.destroy)
+        cancelar_btn.pack(side="right", padx=(10, 40), ipadx=10)
 
     def process_command_form(self, command, num_executions, time_interval):
         """Procesa el formulario de comandos con los datos ingresados"""
@@ -1232,6 +1342,36 @@ class McControlApp:
                 "Validación", "Debe seleccionar un Micro Controlador"
             )
             return
+        
+        # Guardar delta_time en el MC seleccionado
+        delta_time = self.delta_time_var.get()
+        for mc_key, mc_data in self.mc_registered.items():
+            if mc_data.get("mac_destiny") == selected_mc:
+                mc_data["delta_time"] = delta_time  # Guarda el valor en el MC
+                # Guardar estado solo para los comandos presentes en command_configs
+                command_configs = mc_data.get("command_configs", {})
+                last_state = {}
+                for cmd_name in command_configs.keys():
+                    last_state[cmd_name] = self.commands_state.get(cmd_name, {}).get("state", "")
+                mc_data["last_state"] = last_state
+                break
+
+        # Guardar en la base de datos
+        self.update_db_stats()
+        
+        # Buscar el microcontrolador en mc_registered
+        for mc_key, mc_data in self.mc_registered.items():
+            if mc_data.get("mac_destiny") == selected_mc:
+                # Guardar estado solo para los comandos presentes en command_configs
+                command_configs = mc_data.get("command_configs", {})
+                last_state = {}
+                for cmd_name in command_configs.keys():
+                    last_state[cmd_name] = self.commands_state.get(cmd_name, {}).get("state", "")
+                self.mc_registered[mc_key]["last_state"] = last_state
+                break
+
+        # Guardar en la base de datos
+        self.update_db_stats()
 
         # Obtener MAC origen e interfaz
         mac_origen = None
@@ -1477,6 +1617,7 @@ class McControlApp:
             "mac_destiny": mac_destino,
             "interface_destiny": interface_destino,
             "label": label if label else "Sin etiqueta",
+            "command_configs": dict(self.command_configs)
         }
 
         # Limpiar formulario
@@ -1516,6 +1657,26 @@ class McControlApp:
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.response_text.insert(tk.END, f"[{timestamp}] {response}\n")
         self.response_text.see(tk.END)
+
+    
+    # Metodos para la db #
+    def update_db_stats(self):
+        """Actualiza o inserta los datos de microcontroladores registrados en db.json"""
+        db_path = db_json
+
+        # Estructura para guardar
+        if not hasattr(self, "db") or not isinstance(self.db, dict):
+            self.db = {}
+
+        # Actualiza los datos de microcontroladores registrados
+        self.db["mc_registered"] = self.mc_registered
+
+        # Guarda en disco (sobrescribe)
+        try:
+            with open(db_path, "w", encoding="utf-8") as f:
+                json.dump(self.db, f, indent=4)
+        except Exception as e:
+            print(f"Error al guardar en {db_path}: {e}")
 
 
 def main():

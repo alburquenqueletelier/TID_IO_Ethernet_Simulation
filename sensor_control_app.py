@@ -955,6 +955,7 @@ class McControlApp:
                 "ON": "X_FB_TTrig_Auto_EN",
                 "OFF": "X_FC_TTrig_Auto_DIS",
             },
+            "X_FF_Reset": {"ON": "X_FF_Reset", "OFF": ""},
             "X_20_PwrDwnb_TOP_ON | X_21_PwrDwnb_TOP_OFF": {"ON": "X_20_PwrDwnb_TOP_ON", "OFF": "X_21_PwrDwnb_TOP_OFF"},
             "X_22_PwrDwnb_BOT_ON | X_23_PwrDwnb_BOT_OFF": {
                 "ON": "X_22_PwrDwnb_BOT_ON",

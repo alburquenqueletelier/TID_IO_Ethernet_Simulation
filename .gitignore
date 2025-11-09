@@ -7,3 +7,5 @@ docs/gant_image.png
 docs/gantt.pdf
 
 db.json
+
+__pycache__/

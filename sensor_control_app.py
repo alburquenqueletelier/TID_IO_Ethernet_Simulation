@@ -59,6 +59,10 @@ class McControlApp:
         self.admin_in = False
         self.running = False
 
+        # Variable para controlar cancelación de envío
+        self.sending_commands = False
+        self.cancel_sending = False
+
         # Contadores y estadísticas
         self.mc_available = {}  # keys: mac_source, values: interfaces
         self.mc_registered = (
@@ -240,74 +244,140 @@ class McControlApp:
         if not command_configs:
             return
 
+        # Comandos que necesitan columna de repeticiones
+        repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
+        # Comandos que NO tienen botones (automáticos al marcar checkbox)
+        auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
+    
         # Recrear filas en el nuevo orden
         for idx, (cmd_name, cmd_config) in enumerate(command_configs.items()):
             if cmd_name not in last_state:
                 continue 
 
-            bg_color = "#f7f7f7" #if idx % 2 == 0 else "#e3e3e3"
-            row_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color)
+            bg_color = "#f7f7f7"
+            row_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color, height=35)
             row_frame.pack(fill="x")
+            row_frame.pack_propagate(False)
+            row_frame.grid_propagate(False)
+
+            # Configurar el grid para centrar verticalmente
+            row_frame.grid_rowconfigure(0, weight=1)
 
             # Restaurar estado si existe, sino inicializar
             state_val = last_state.get(cmd_name, None)
             enabled_val = bool(state_val)
+            
+            # Extraer comando base para verificar tipo
+            base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+
+            # Para comandos automáticos, el checkbox debe estar marcado si state_val == "ON"
+            if base_cmd in auto_commands:
+                enabled_val = (state_val == "ON")
+            else:
+                enabled_val = bool(state_val)
 
             self.commands_state[cmd_name] = {
-                "enabled": tk.BooleanVar(value=enabled_val),
-                "state": state_val,
+                        "enabled": tk.BooleanVar(value=enabled_val),
+                        "state": state_val if state_val else ("ON" if base_cmd in auto_commands else None),
             }
+            
+            # Si es un comando repetible, restaurar variable de repeticiones
+            if base_cmd in repeatable_commands:
+                reps_key = f"{cmd_name}_reps"
+                saved_reps = last_state.get(reps_key, 1)
+                self.commands_state[cmd_name]["repetitions"] = tk.IntVar(value=saved_reps)
 
             # Checkbox
             checkbox = tk.Checkbutton(
                 row_frame, variable=self.commands_state[cmd_name]["enabled"], bg=bg_color
             )
-            checkbox.grid(row=0, column=0, padx=5)
+            checkbox.grid(row=0, column=0, padx=5, sticky="")
 
             # Nombre del comando
             tk.Label(
-                row_frame, text=cmd_name, width=48, font=("Arial", 9), bg=bg_color
-            ).grid(row=0, column=1)
+                row_frame, text=cmd_name, width=54, font=("Arial", 9), bg=bg_color
+            ).grid(row=0, column=1, sticky="w")
 
-            # Obtener llaves para los botones (por ejemplo: ["ON", "OFF"] o ["LOW", "HIGH"])
-            btn_keys = list(cmd_config.keys())
-            btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
-            btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
+            col_offset = 2
 
-            on_btn = tk.Button(
-                row_frame,
-                text=btn1_text,
-                width=8,
-                bg="#e0e0e0",
-                command=lambda cmd=cmd_name, state=btn1_text: self.toggle_command_state(cmd, state),
-            )
-            on_btn.grid(row=0, column=2, padx=2, pady=2)
+            # Si es comando repetible, agregar spinbox de repeticiones
+            if base_cmd in repeatable_commands:
+                tk.Label(row_frame, text="Repetir:", font=("Arial", 8), bg=bg_color).grid(row=0, column=col_offset, padx=(5,2))
+                col_offset += 1
+                
+                repetitions_spinbox = tk.Spinbox(
+                    row_frame,
+                    from_=1,
+                    to=1000,
+                    textvariable=self.commands_state[cmd_name]["repetitions"],
+                    width=5,
+                    justify="center"
+                )
+                repetitions_spinbox.grid(row=0, column=col_offset, padx=2)
+                col_offset += 1
+                
+            # Solo agregar botones si NO es un comando automático
+            if base_cmd not in auto_commands:
+                # Obtener llaves para los botones
+                btn_keys = list(cmd_config.keys())
+                btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
+                btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
 
-            off_btn = tk.Button(
-                row_frame,
-                text=btn2_text,
-                width=8,
-                bg="#e0e0e0",
-                command=lambda cmd=cmd_name, state=btn2_text: self.toggle_command_state(cmd, state),
-            )
-            off_btn.grid(row=0, column=3, padx=2, pady=2)
+                # Botón ON
+                on_btn = tk.Button(
+                    row_frame,
+                    text=btn1_text,
+                    width=8,
+                    height=1,
+                    bg="#e0e0e0",
+                    command=lambda cmd=cmd_name, state=btn1_text: self.toggle_command_state(cmd, state),
+                )
+                on_btn.grid(row=0, column=col_offset, padx=2, pady=2)
+                col_offset += 1
 
-            # Guardar referencias de botones
-            self.commands_state[cmd_name]["on_btn"] = on_btn
-            self.commands_state[cmd_name]["off_btn"] = off_btn
+                # Guardar referencia del botón ON
+                self.commands_state[cmd_name]["on_btn"] = on_btn
 
-            # Cargar estado guardado si existe (last_state)
-            if state_val == btn1_text:
-                self.commands_state[cmd_name]["state"] = btn1_text
-                on_btn.config(bg="#27ae60", relief="sunken")
-                off_btn.config(bg="#e0e0e0", relief="raised")
-            elif state_val == btn2_text:
-                self.commands_state[cmd_name]["state"] = btn2_text
-                off_btn.config(bg="#e74c3c", relief="sunken")
-                on_btn.config(bg="#e0e0e0", relief="raised")
+                # Botón OFF si tiene dos opciones
+                if len(btn_keys) > 1:
+                    off_btn = tk.Button(
+                        row_frame,
+                        text=btn2_text,
+                        width=8,
+                        height=1,
+                        bg="#e0e0e0",
+                        command=lambda cmd=cmd_name, state=btn2_text: self.toggle_command_state(cmd, state),
+                    )
+                    off_btn.grid(row=0, column=col_offset, padx=2, pady=2)
+                    self.commands_state[cmd_name]["off_btn"] = off_btn
+                    col_offset += 1
+                else:
+                    self.commands_state[cmd_name]["off_btn"] = None
+
+                # Cargar estado guardado si existe
+                if state_val == btn1_text:
+                    on_btn.config(bg="#27ae60", relief="sunken")
+                    if self.commands_state[cmd_name].get("off_btn"):
+                        self.commands_state[cmd_name]["off_btn"].config(bg="#e0e0e0", relief="raised")
+                elif state_val == btn2_text:
+                    if self.commands_state[cmd_name].get("off_btn"):
+                        self.commands_state[cmd_name]["off_btn"].config(bg="#e74c3c", relief="sunken")
+                    on_btn.config(bg="#e0e0e0", relief="raised")
+                else:
+                    on_btn.config(bg="#e0e0e0", relief="raised")
+                    if self.commands_state[cmd_name].get("off_btn"):
+                        self.commands_state[cmd_name]["off_btn"].config(bg="#e0e0e0", relief="raised")
             else:
-                on_btn.config(bg="#e0e0e0", relief="raised")
-                off_btn.config(bg="#e0e0e0", relief="raised")
+                # Para comandos automáticos, no hay botones
+                self.commands_state[cmd_name]["on_btn"] = None
+                self.commands_state[cmd_name]["off_btn"] = None
+                tk.Label(
+                    row_frame, 
+                    text="", 
+                    font=("Arial", 8, "italic"), 
+                    fg="gray",
+                    bg=bg_color
+                ).grid(row=0, column=col_offset, padx=10)
 
             self.command_rows.append({"frame": row_frame, "cmd_name": cmd_name})
             self.setup_drag_and_drop(row_frame, cmd_name)
@@ -351,62 +421,6 @@ class McControlApp:
 
             except Exception as e:
                 print(f"Error al crear '{nombre_archivo}': {e}")
-
-    def create_login_screen(self):
-        """Crea la pantalla de login"""
-        self.login_frame = tk.Frame(self.root, bg="#2c3e50", width=400, height=300)
-        self.login_frame.place(relx=0.5, rely=0.5, anchor="center")
-
-        # Título
-        title_label = tk.Label(
-            self.login_frame,
-            text="Sistema de Control de Micro Controladores",
-            font=("Arial", 16, "bold"),
-            fg="white",
-            bg="#2c3e50",
-        )
-        title_label.pack(pady=30)
-
-        # Usuario
-        tk.Label(self.login_frame, text="Usuario:", fg="white", bg="#2c3e50").pack()
-        self.username_entry = tk.Entry(self.login_frame, width=20)
-        self.username_entry.pack(pady=5)
-
-        # Contraseña
-        tk.Label(self.login_frame, text="Contraseña:", fg="white", bg="#2c3e50").pack()
-        self.password_entry = tk.Entry(self.login_frame, show="*", width=20)
-        self.password_entry.pack(pady=5)
-
-        # Botón login
-        login_btn = tk.Button(
-            self.login_frame,
-            text="Iniciar Sesión",
-            command=self.login,
-            bg="#3498db",
-            fg="white",
-            width=15,
-            height=1,
-        )
-        login_btn.pack(pady=20)
-
-        # Enfocar en el campo de usuario
-        self.username_entry.focus()
-
-        # Bind Enter key
-        self.root.bind("<Return>", lambda event: self.login())
-
-    def login(self):
-        """Verifica credenciales y accede a la aplicación"""
-        username = self.username_entry.get()
-        password = self.password_entry.get()
-
-        # Credenciales hardcodeadas (solo para desarrollo)
-        if username == "admin" and password == "sensor123":
-            self.admin_in = True
-            self.login_frame.destroy()
-            self.create_main_interface()
-        else:
-            messagebox.showerror("Error", "Usuario o contraseña incorrectos")
 
     def create_main_interface(self):
         """Crea la interfaz principal de la aplicación"""
@@ -700,179 +714,6 @@ class McControlApp:
         main_row_container = tk.Frame(scrollable_frame)
         main_row_container.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Frame izquierdo: contendrá ambos formularios uno sobre otro
-        forms_left_frame = tk.Frame(main_row_container)
-        forms_left_frame.pack(side="left", fill="both", expand=True)
-
-        # Frame para X_02_TestTrigger (mitad superior)
-        form_frame = tk.LabelFrame(forms_left_frame, text="X_02_TestTrigger")
-        form_frame.pack(fill="both", expand=True, padx=(0, 5), pady=(0, 2))
-
-        form_container = tk.Frame(form_frame)
-        form_container.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Fila 1: Número de ejecuciones
-        executions_row = tk.Frame(form_container)
-        executions_row.pack(fill="x", pady=3)
-
-        tk.Label(
-            executions_row,
-            text="Ejecuciones:",
-            font=("Arial", 9, "bold"),
-            width=12,
-            anchor="w",
-        ).pack(side="left")
-
-        self.executions_var = tk.IntVar(value=1)
-        executions_spinbox = tk.Spinbox(
-            executions_row,
-            from_=1,
-            to=100,
-            textvariable=self.executions_var,
-            width=8,
-            justify="center",
-        )
-        executions_spinbox.pack(side="left", padx=(5, 3))
-
-        tk.Label(executions_row, text="(1-100)", fg="gray", font=("Arial", 7)).pack(
-            side="left"
-        )
-
-        # Fila 2: Intervalo de tiempo
-        interval_row = tk.Frame(form_container)
-        interval_row.pack(fill="x", pady=3)
-
-        tk.Label(
-            interval_row,
-            text="Intervalo (seg):",
-            font=("Arial", 9, "bold"),
-            width=12,
-            anchor="w",
-        ).pack(side="left")
-
-        self.interval_var = tk.DoubleVar(value=1.0)
-        interval_spinbox = tk.Spinbox(
-            interval_row,
-            from_=0.1,
-            to=3600.0,
-            increment=0.5,
-            textvariable=self.interval_var,
-            width=8,
-            justify="center",
-            format="%.1f",
-        )
-        interval_spinbox.pack(side="left", padx=(5, 3))
-
-        tk.Label(interval_row, text="(0.1-3600)", fg="gray", font=("Arial", 7)).pack(
-            side="left"
-        )
-
-        # Botón de envío
-        button_row = tk.Frame(form_container)
-        button_row.pack(fill="x", pady=(10, 0))
-
-        send_form_btn = tk.Button(
-            button_row,
-            text="🚀 Enviar",
-            command=lambda: self.process_command_form(
-                "X_02_TestTrigger", self.executions_var.get(), self.interval_var.get()
-            ),
-            font=("Arial", 10, "bold"),
-            bg="#2ecc71",
-            fg="white",
-            width=18,
-            height=1,
-            relief="raised",
-        )
-        send_form_btn.pack()
-
-        # ============================================
-        # NUEVO: Formulario X_03_RO_Single
-        # ============================================
-        # Frame para X_03_RO_Single (mitad inferior)
-        ro_single_frame = tk.LabelFrame(forms_left_frame, text="X_03_RO_Single")
-        ro_single_frame.pack(fill="both", expand=True, padx=(0, 5), pady=(2, 0))
-
-        ro_single_form_container = tk.Frame(ro_single_frame)
-        ro_single_form_container.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Fila 1: Número de ejecuciones
-        ro_executions_row = tk.Frame(ro_single_form_container)
-        ro_executions_row.pack(fill="x", pady=3)
-
-        tk.Label(
-            ro_executions_row,
-            text="Ejecuciones:",
-            font=("Arial", 9, "bold"),
-            width=12,
-            anchor="w",
-        ).pack(side="left")
-
-        self.ro_executions_var = tk.IntVar(value=1)
-        ro_executions_spinbox = tk.Spinbox(
-            ro_executions_row,
-            from_=1,
-            to=100,
-            textvariable=self.ro_executions_var,
-            width=8,
-            justify="center",
-        )
-        ro_executions_spinbox.pack(side="left", padx=(5, 3))
-
-        tk.Label(ro_executions_row, text="(1-100)", fg="gray", font=("Arial", 7)).pack(
-            side="left"
-        )
-
-        # Fila 2: Intervalo de tiempo
-        ro_interval_row = tk.Frame(ro_single_form_container)
-        ro_interval_row.pack(fill="x", pady=3)
-
-        tk.Label(
-            ro_interval_row,
-            text="Intervalo (seg):",
-            font=("Arial", 9, "bold"),
-            width=12,
-            anchor="w",
-        ).pack(side="left")
-
-        self.ro_interval_var = tk.DoubleVar(value=1.0)
-        ro_interval_spinbox = tk.Spinbox(
-            ro_interval_row,
-            from_=0.1,
-            to=3600.0,
-            increment=0.5,
-            textvariable=self.ro_interval_var,
-            width=8,
-            justify="center",
-            format="%.1f",
-        )
-        ro_interval_spinbox.pack(side="left", padx=(5, 3))
-
-        tk.Label(ro_interval_row, text="(0.1-3600)", fg="gray", font=("Arial", 7)).pack(
-            side="left"
-        )
-
-        # Botón de envío
-        ro_button_row = tk.Frame(ro_single_form_container)
-        ro_button_row.pack(fill="x", pady=(10, 0))
-
-        send_ro_form_btn = tk.Button(
-            ro_button_row,
-            text="🚀 Enviar",
-            command=lambda: self.process_command_form(
-                "X_03_RO_Single",
-                self.ro_executions_var.get(),
-                self.ro_interval_var.get(),
-            ),
-            font=("Arial", 10, "bold"),
-            bg="#2ecc71",
-            fg="white",
-            width=18,
-            height=1,
-            relief="raised",
-        )
-        send_ro_form_btn.pack()
-
         # Frame derecho: Comandos
         controls_frame = tk.LabelFrame(main_row_container, text="Comandos")
         controls_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
@@ -903,6 +744,30 @@ class McControlApp:
             format="%.1f",
         )
         delta_time_spinbox.pack(side="left", padx=(5, 0))
+
+        # Botones de Macros
+        macros_frame = tk.Frame(delta_time_frame)
+        macros_frame.pack(side="right", padx=(10, 0))
+        
+        save_macro_btn = tk.Button(
+            macros_frame,
+            text="💾 Guardar Macro",
+            font=("Arial", 9, "bold"),
+            bg="#27ae60",
+            fg="white",
+            command=self.save_macro
+        )
+        save_macro_btn.pack(side="left", padx=(0, 5))
+        
+        load_macro_btn = tk.Button(
+            macros_frame,
+            text="📂 Cargar Macro",
+            font=("Arial", 9, "bold"),
+            bg="#3498db",
+            fg="white",
+            command=self.load_macro
+        )
+        load_macro_btn.pack(side="left", padx=(0, 5))
 
         # Botón "Gestionar Comandos"
         add_command_btn = tk.Button(
@@ -938,7 +803,7 @@ class McControlApp:
         select_all_cb.grid(row=0, column=0, padx=1, pady=2)
 
         tk.Label(
-            header_frame, text="Comando", width=54, font=("Arial", 8, "bold")
+            header_frame, text="Comando", width=58, font=("Arial", 8, "bold")
         ).grid(row=0, column=1)
         tk.Label(
             header_frame, text="ON/HIGH/GLOBAL", width=15, font=("Arial", 8, "bold"), padx=10
@@ -949,13 +814,15 @@ class McControlApp:
 
         # Definir comandos con sus appendix
         self.command_configs = {
+            "X_02_TestTrigger": {"ON": "X_02_TestTrigger"},  
+            "X_03_RO_Single": {"ON": "X_03_RO_Single"},
             "X_04_RO_ON | X_05_RO_OFF": {"ON": "X_04_RO_ON", "OFF": "X_05_RO_OFF"},
             "X_08_DIAG_ | X_09_DIAG_DIS": {"ON": "X_08_DIAG_", "OFF": "X_09_DIAG_DIS"},
             "X_FB_TTrig_Auto_EN | X_FC_TTrig_Auto_DIS": {
                 "ON": "X_FB_TTrig_Auto_EN",
                 "OFF": "X_FC_TTrig_Auto_DIS",
             },
-            "X_FF_Reset": {"ON": "X_FF_Reset", "OFF": ""},
+            "X_FF_Reset": {"ON": "X_FF_Reset"},
             "X_20_PwrDwnb_TOP_ON | X_21_PwrDwnb_TOP_OFF": {"ON": "X_20_PwrDwnb_TOP_ON", "OFF": "X_21_PwrDwnb_TOP_OFF"},
             "X_22_PwrDwnb_BOT_ON | X_23_PwrDwnb_BOT_OFF": {
                 "ON": "X_22_PwrDwnb_BOT_ON",
@@ -968,7 +835,6 @@ class McControlApp:
             "HIGH": "X_E1_FanSpeed0_High", "LOW": "X_E0_FanSpeed0_Low"
             },
             "X_F9_TTrig_Global | X_FA_TTrig_Local": {"GLOBAL": "X_F9_TTrig_Global", "LOCAL": "X_FA_TTrig_Local"},
-            "X_E1_FanSpeed0_High | X_E0_FanSpeed0_Low": {"HIGH": "X_E1_FanSpeed0_High", "LOW": "X_E0_FanSpeed0_Low"},
             "X_E3_FanSpeed1_High | X_E2_FanSpeed1_Low": {"HIGH": "X_E3_FanSpeed1_High", "LOW": "X_E2_FanSpeed1_Low"},
         }
 
@@ -981,62 +847,6 @@ class McControlApp:
 
         # Guardar referencia al frame contenedor
         self.commands_table_frame = table_frame
-
-        for idx, (cmd_name, cmd_config) in enumerate(self.command_configs.items()):
-            row_frame = tk.Frame(table_frame, relief="ridge", borderwidth=1, bg="white")
-            row_frame.pack(fill="x")
-
-            # Inicializar estado
-            self.commands_state[cmd_name] = {
-                "enabled": tk.BooleanVar(value=False),
-                "state": None,
-            }
-
-            # Checkbox
-            checkbox = tk.Checkbutton(
-                row_frame, variable=self.commands_state[cmd_name]["enabled"]
-            )
-            checkbox.grid(row=0, column=0, padx=5)
-
-            # Nombre del comando
-            tk.Label(
-                row_frame, text=cmd_name, width=48, font=("Arial", 9), bg="white"
-            ).grid(row=0, column=1)
-
-            # Obtener llaves para los botones (por ejemplo: ["ON", "OFF"] o ["LOW", "HIGH"])
-            btn_keys = list(cmd_config.keys())
-            btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
-            btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
-
-            # Botón 1 (ON/LOW)
-            on_btn = tk.Button(
-                row_frame,
-                text=btn1_text,
-                width=8,
-                bg="#e0e0e0",
-                command=lambda cmd=cmd_name, state=btn1_text: self.toggle_command_state(cmd, state),
-            )
-            on_btn.grid(row=0, column=2, padx=2, pady=2)
-
-            # Botón 2 (OFF/HIGH)
-            off_btn = tk.Button(
-                row_frame,
-                text=btn2_text,
-                width=8,
-                bg="#e0e0e0",
-                command=lambda cmd=cmd_name, state=btn2_text: self.toggle_command_state(cmd, state),
-            )
-            off_btn.grid(row=0, column=3, padx=2, pady=2)
-
-            # Guardar referencias de botones
-            self.commands_state[cmd_name]["on_btn"] = on_btn
-            self.commands_state[cmd_name]["off_btn"] = off_btn
-
-            # Guardar referencia de la fila
-            self.command_rows.append({"frame": row_frame, "cmd_name": cmd_name})
-
-            # Setup drag and drop
-            self.setup_drag_and_drop(row_frame, cmd_name)
 
         self.show_summary_var = tk.BooleanVar(value=False)
         summary_frame = tk.Frame(commands_main_container)
@@ -1051,10 +861,10 @@ class McControlApp:
         summary_checkbox.pack(side="left", padx=(0, 10))
 
         # Botón enviar comandos
-        send_commands_btn = tk.Button(
+        self.send_commands_btn = tk.Button(
             commands_main_container,
             text="Enviar Comandos",
-            command=self.send_selected_commands,
+            command=self.toggle_send_commands, 
             font=("Arial", 10, "bold"),
             bg="#3498db",
             fg="white",
@@ -1062,7 +872,510 @@ class McControlApp:
             height=2,
             relief="raised",
         )
-        send_commands_btn.pack(pady=(10, 0))
+        self.send_commands_btn.pack(pady=(10, 0))
+    
+    def toggle_send_commands(self):
+        """Alterna entre enviar y cancelar comandos"""
+        if self.sending_commands:
+            # Si está enviando, cancelar
+            self.cancel_sending = True
+            self.add_response("⚠️ Cancelación solicitada...")
+        else:
+            # Si no está enviando, iniciar envío
+            self.send_selected_commands()
+
+    def save_macro(self):
+        """Guarda la configuración actual de comandos como una macro"""
+        selected_mc_display = self.mc_var.get()
+        selected_mc = self.get_mac_from_selection(selected_mc_display)
+        if not selected_mc:
+            messagebox.showwarning("Validación", "Debe seleccionar un Micro Controlador.")
+            return
+
+        # Buscar el MC seleccionado
+        mc_data = None
+        for data in self.mc_registered.values():
+            if data.get("mac_destiny") == selected_mc:
+                mc_data = data
+                break
+        
+        if not mc_data:
+            messagebox.showwarning("Validación", "Micro Controlador no encontrado.")
+            return
+
+        # Verificar que hay comandos configurados
+        command_configs = mc_data.get("command_configs", {})
+        if not command_configs:
+            messagebox.showwarning("Validación", "No hay comandos configurados para guardar.")
+            return
+        
+        # Obtener macros existentes
+        existing_macros = mc_data.get("macros", {})
+
+        # Calcular altura del modal según cantidad de macros
+        base_height = 250  # Altura base (título, input, botones)
+        if existing_macros:
+            macros_section_height = min(250, len(existing_macros) * 35 + 60)  # Max 250px para el listado
+        else:
+            macros_section_height = 0
+        
+        modal_height = base_height + macros_section_height
+        
+        # Modal para solicitar nombre de la macro
+        modal = tk.Toplevel(self.root)
+        modal.title("Guardar Macro")
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+
+        # Usar el método helper para centrar
+        self.center_modal_on_parent(modal, 500, modal_height)  # <-- CAMBIO AQUÍ
+        
+        tk.Label(
+        modal,
+        text="Guardar Macro",
+        font=("Arial", 12, "bold"),
+        bg="#f7f7f7"
+        ).pack(pady=(20, 10))
+
+        # Frame para el input del nombre
+        name_frame = tk.Frame(modal, bg="#f7f7f7")
+        name_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        tk.Label(
+            name_frame,
+            text="Nombre de la macro:",
+            font=("Arial", 10),
+            bg="#f7f7f7"
+        ).pack(anchor="w")
+
+        name_var = tk.StringVar()
+        name_entry = tk.Entry(name_frame, textvariable=name_var, font=("Arial", 10))
+        name_entry.pack(fill="x", pady=(5, 0))
+        name_entry.focus()
+
+        # Sección de macros existentes (si hay)
+        if existing_macros:
+            tk.Label(
+                modal,
+                text="Macros guardadas (clic para seleccionar):",
+                font=("Arial", 10, "bold"),
+                bg="#f7f7f7"
+            ).pack(anchor="w", padx=20, pady=(10, 5))
+
+            # Frame con scroll para las macros - altura dinámica según cantidad
+            max_height = min(250, len(existing_macros) * 35 + 10)  # Máximo 250px
+            macros_canvas_frame = tk.Frame(modal, bg="#f7f7f7", height=max_height)
+            macros_canvas_frame.pack(fill="x", padx=20, pady=(0, 10))  # <-- CAMBIAR fill="both" a fill="x"
+            macros_canvas_frame.pack_propagate(False)
+
+            macros_canvas = tk.Canvas(
+                macros_canvas_frame,
+                bg="#f7f7f7",
+                highlightthickness=1,
+                highlightbackground="#ccc"
+            )
+            macros_scrollbar = tk.Scrollbar(macros_canvas_frame, orient="vertical", command=macros_canvas.yview)
+            macros_list_frame = tk.Frame(macros_canvas, bg="#f7f7f7")
+
+            macros_list_frame.bind("<Configure>", lambda e: macros_canvas.configure(scrollregion=macros_canvas.bbox("all")))
+            canvas_window = macros_canvas.create_window((0, 0), window=macros_list_frame, anchor="nw")
+            
+            # Ajustar ancho del frame interno al canvas
+            def on_canvas_configure(event):
+                macros_canvas.itemconfig(canvas_window, width=event.width)
+            
+            macros_canvas.bind("<Configure>", on_canvas_configure)
+            macros_canvas.configure(yscrollcommand=macros_scrollbar.set)
+
+            macros_canvas.pack(side="left", fill="both", expand=True)
+            macros_scrollbar.pack(side="right", fill="y")
+
+            # Agregar cada macro con botón de eliminar
+            for macro_name in existing_macros.keys():
+                macro_row = tk.Frame(macros_list_frame, bg="white", relief="ridge", borderwidth=1)
+                macro_row.pack(fill="x", pady=2, padx=2)
+
+                # Frame para el texto (se expande)
+                text_frame = tk.Frame(macro_row, bg="white")
+                text_frame.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+
+                # Label con el nombre de la macro (truncado)
+                macro_label = tk.Label(
+                    text_frame,
+                    text=macro_name if len(macro_name) <= 30 else macro_name[:27] + "...",
+                    font=("Arial", 9),
+                    bg="white",
+                    anchor="w",
+                    cursor="hand2"
+                )
+                macro_label.pack(fill="x", expand=True)
+
+                # Tooltip para mostrar nombre completo al hacer hover
+                def create_tooltip(widget, text):
+                    tooltip = None
+                    
+                    def on_enter(event):
+                        nonlocal tooltip
+                        if len(text) > 30:  # Solo mostrar si está truncado
+                            x, y, _, _ = widget.bbox("insert")
+                            x += widget.winfo_rootx() + 25
+                            y += widget.winfo_rooty() + 25
+                            
+                            tooltip = tk.Toplevel(widget)
+                            tooltip.wm_overrideredirect(True)
+                            tooltip.wm_geometry(f"+{x}+{y}")
+                            
+                            label = tk.Label(
+                                tooltip,
+                                text=text,
+                                background="lightyellow",
+                                relief="solid",
+                                borderwidth=1,
+                                font=("Arial", 9)
+                            )
+                            label.pack()
+                    
+                    def on_leave(event):
+                        nonlocal tooltip
+                        if tooltip:
+                            tooltip.destroy()
+                            tooltip = None
+                    
+                    widget.bind("<Enter>", on_enter)
+                    widget.bind("<Leave>", on_leave)
+                
+                create_tooltip(macro_label, macro_name)
+
+                # Click para seleccionar
+                def select_macro(name):
+                    name_var.set(name)
+                
+                macro_label.bind("<Button-1>", lambda e, name=macro_name: select_macro(name))
+
+                # Botón eliminar (alineado a la derecha)
+                def on_delete():
+                    if self.delete_macro(mc_data, macro_name, lambda: [modal.destroy(), self.save_macro()]):
+                        pass 
+
+                delete_btn = tk.Button(
+                    macro_row,
+                    text="🗑️",
+                    font=("Arial", 10),
+                    bg="#e74c3c",
+                    fg="white",
+                    width=3,
+                    command=on_delete
+                )
+                delete_btn.pack(side="right", padx=5, pady=2)
+
+
+        # Frame para botones
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(fill="x", pady=(10, 20), side="bottom")  
+
+
+        def guardar():
+            macro_name = name_var.get().strip()
+            if not macro_name:
+                messagebox.showwarning("Validación", "Debe ingresar un nombre para la macro.")
+                return
+
+            # Verificar si ya existe
+            if macro_name in existing_macros:
+                if not messagebox.askyesno("Confirmar sobrescritura", f"La macro '{macro_name}' ya existe.\n¿Desea sobrescribirla?"):
+                    return
+
+            # Construir last_state actual
+            current_last_state = {}
+            for cmd_name in command_configs.keys():
+                cmd_state = self.commands_state.get(cmd_name, {})
+                current_last_state[cmd_name] = cmd_state.get("state", "")
+                
+                # Guardar repeticiones si aplica
+                base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+                if base_cmd in ["X_02_TestTrigger", "X_03_RO_Single"] and "repetitions" in cmd_state:
+                    current_last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
+
+            # Construir datos de la macro
+            macro_data = {
+                "command_configs": dict(command_configs),
+                "last_state": current_last_state,
+                "delta_time": self.delta_time_var.get()
+            }
+
+            # Guardar en el MC
+            if "macros" not in mc_data:
+                mc_data["macros"] = {}
+            
+            mc_data["macros"][macro_name] = macro_data
+            self.update_db_stats()
+            
+            messagebox.showinfo("Éxito", f"Macro '{macro_name}' guardada correctamente.")
+            modal.destroy()
+
+        guardar_btn = tk.Button(
+            btn_frame,
+            text="Guardar",
+            font=("Arial", 10, "bold"),
+            bg="#27ae60",
+            fg="white",
+            command=guardar,
+            width=10
+        )
+        guardar_btn.pack(side="left", padx=(40, 10))
+
+        cancelar_btn = tk.Button(
+            btn_frame,
+            text="Cancelar",
+            font=("Arial", 10, "bold"),
+            bg="#e74c3c",
+            fg="white",
+            command=modal.destroy,
+            width=10
+        )
+        cancelar_btn.pack(side="right", padx=(10, 40))
+
+    def load_macro(self):
+        """Carga una macro previamente guardada"""
+        selected_mc_display = self.mc_var.get()
+        selected_mc = self.get_mac_from_selection(selected_mc_display)
+        if not selected_mc:
+            messagebox.showwarning("Validación", "Debe seleccionar un Micro Controlador.")
+            return
+
+        # Buscar el MC seleccionado
+        mc_data = None
+        for data in self.mc_registered.values():
+            if data.get("mac_destiny") == selected_mc:
+                mc_data = data
+                break
+
+        if not mc_data:
+            messagebox.showwarning("Validación", "Micro Controlador no encontrado.")
+            return
+
+        macros = mc_data.get("macros", {})
+        if not macros:
+            messagebox.showinfo("Información", "No hay macros guardadas para este Micro Controlador.")
+            return
+
+        # Modal para seleccionar macro
+        modal = tk.Toplevel(self.root)
+        modal.title("Cargar Macro")
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+
+        # Usar el método helper para centrar
+        self.center_modal_on_parent(modal, 500, 400)  # <-- CAMBIO AQUÍ
+        
+        tk.Label(
+            modal,
+            text="Seleccione una macro para cargar:",
+            font=("Arial", 11, "bold"),
+            bg="#f7f7f7"
+        ).pack(pady=(20, 10))
+
+        # Frame con scroll para las macros
+        macros_canvas_frame = tk.Frame(modal, bg="#f7f7f7")
+        macros_canvas_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        macros_canvas = tk.Canvas(
+            macros_canvas_frame,
+            bg="#f7f7f7",
+            highlightthickness=1,
+            highlightbackground="#ccc"
+        )
+        macros_scrollbar = tk.Scrollbar(macros_canvas_frame, orient="vertical", command=macros_canvas.yview)
+        macros_list_frame = tk.Frame(macros_canvas, bg="#f7f7f7")
+
+        macros_list_frame.bind("<Configure>", lambda e: macros_canvas.configure(scrollregion=macros_canvas.bbox("all")))
+        canvas_window = macros_canvas.create_window((0, 0), window=macros_list_frame, anchor="nw")
+        
+        # Ajustar ancho del frame interno al canvas
+        def on_canvas_configure(event):
+            macros_canvas.itemconfig(canvas_window, width=event.width)
+        
+        macros_canvas.bind("<Configure>", on_canvas_configure)
+        macros_canvas.configure(yscrollcommand=macros_scrollbar.set)
+
+        macros_canvas.pack(side="left", fill="both", expand=True)
+        macros_scrollbar.pack(side="right", fill="y")
+
+        # Variable para almacenar la macro seleccionada
+        selected_macro = tk.StringVar()
+
+        # Lista para mantener referencias de todas las filas
+        macro_rows_widgets = []
+
+        # Agregar cada macro con botón de eliminar
+        for macro_name in macros.keys():
+            macro_row = tk.Frame(macros_list_frame, bg="white", relief="ridge", borderwidth=1)
+            macro_row.pack(fill="x", pady=2, padx=2)
+
+            # Frame para el texto (se expande)
+            text_frame = tk.Frame(macro_row, bg="white")
+            text_frame.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+
+            # Label con el nombre de la macro (truncado)
+            macro_label = tk.Label(
+                text_frame,
+                text=macro_name if len(macro_name) <= 30 else macro_name[:27] + "...",
+                font=("Arial", 9),
+                bg="white",
+                anchor="w",
+                cursor="hand2"
+            )
+            macro_label.pack(fill="x", expand=True)
+
+            # Guardar referencias de widgets de esta fila
+            macro_rows_widgets.append({
+                "row": macro_row,
+                "frame": text_frame,
+                "label": macro_label
+            })
+
+            # Tooltip para mostrar nombre completo al hacer hover
+            def create_tooltip(widget, text):
+                tooltip = None
+                
+                def on_enter(event):
+                    nonlocal tooltip
+                    if len(text) > 30:
+                        x, y, _, _ = widget.bbox("insert")
+                        x += widget.winfo_rootx() + 25
+                        y += widget.winfo_rooty() + 25
+                        
+                        tooltip = tk.Toplevel(widget)
+                        tooltip.wm_overrideredirect(True)
+                        tooltip.wm_geometry(f"+{x}+{y}")
+                        
+                        label = tk.Label(
+                            tooltip,
+                            text=text,
+                            background="lightyellow",
+                            relief="solid",
+                            borderwidth=1,
+                            font=("Arial", 9)
+                        )
+                        label.pack()
+                
+                def on_leave(event):
+                    nonlocal tooltip
+                    if tooltip:
+                        tooltip.destroy()
+                        tooltip = None
+                
+                widget.bind("<Enter>", on_enter)
+                widget.bind("<Leave>", on_leave)
+            
+            create_tooltip(macro_label, macro_name)
+
+            # Click para seleccionar
+            def select_macro_fn(name, current_row, current_frame, current_label):
+                selected_macro.set(name)
+                
+                # Restaurar color de TODAS las filas
+                for widgets in macro_rows_widgets:
+                    widgets["row"].config(bg="white")
+                    widgets["frame"].config(bg="white")
+                    widgets["label"].config(bg="white")
+                
+                # Aplicar color de selección a la fila actual
+                current_row.config(bg="#e3f2fd")
+                current_frame.config(bg="#e3f2fd")
+                current_label.config(bg="#e3f2fd")
+            
+            # Bind con argumentos correctos usando valores actuales del loop
+            macro_label.bind("<Button-1>", lambda e, n=macro_name, r=macro_row, f=text_frame, l=macro_label: select_macro_fn(n, r, f, l))
+            text_frame.bind("<Button-1>", lambda e, n=macro_name, r=macro_row, f=text_frame, l=macro_label: select_macro_fn(n, r, f, l))
+            macro_row.bind("<Button-1>", lambda e, n=macro_name, r=macro_row, f=text_frame, l=macro_label: select_macro_fn(n, r, f, l))
+
+            # Botón eliminar
+            def on_delete(name):
+                if self.delete_macro(mc_data, name, lambda: [modal.destroy(), self.load_macro()]):
+                    pass
+
+            delete_btn = tk.Button(
+                macro_row,
+                text="🗑️",
+                font=("Arial", 10),
+                bg="#e74c3c",
+                fg="white",
+                width=3,
+                command=lambda name=macro_name: on_delete(name)
+            )
+            delete_btn.pack(side="right", padx=5, pady=2)
+
+
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(pady=(10, 20))
+
+        def cargar():
+            macro_name = selected_macro.get()
+            if not macro_name:
+                messagebox.showwarning("Validación", "Debe seleccionar una macro.")
+                return
+
+            if macro_name not in macros:
+                messagebox.showerror("Error", "La macro seleccionada ya no existe.")
+                return
+
+            macro_data = macros[macro_name]
+
+            # Cargar configuración de la macro en la tabla
+            mc_data["command_configs"] = dict(macro_data["command_configs"])
+            mc_data["last_state"] = dict(macro_data.get("last_state", {}))
+            self.delta_time_var.set(macro_data.get("delta_time", 0.5))
+            
+            self.rebuild_command_table()
+            modal.destroy()
+
+        cargar_btn = tk.Button(
+            btn_frame,
+            text="Cargar",
+            font=("Arial", 10, "bold"),
+            bg="#3498db",
+            fg="white",
+            command=cargar,
+            width=10
+        )
+        cargar_btn.pack(side="left", padx=10)
+
+        cancelar_btn = tk.Button(
+            btn_frame,
+            text="Cancelar",
+            font=("Arial", 10, "bold"),
+            bg="#e74c3c",
+            fg="white",
+            command=modal.destroy,
+            width=10
+        )
+        cancelar_btn.pack(side="right", padx=10)
+
+    def delete_macro(self, mc_data, macro_name, callback=None):
+        """Elimina una macro del microcontrolador
+        
+        Args:
+            mc_data: Datos del microcontrolador
+            macro_name: Nombre de la macro a eliminar
+            callback: Función opcional a ejecutar después de eliminar
+        """
+        if messagebox.askyesno("Confirmar eliminación", f"¿Eliminar la macro '{macro_name}'?"):
+            if "macros" in mc_data and macro_name in mc_data["macros"]:
+                del mc_data["macros"][macro_name]
+                self.update_db_stats()
+                messagebox.showinfo("Éxito", f"Macro '{macro_name}' eliminada correctamente.")
+                
+                # Ejecutar callback si existe
+                if callback:
+                    callback()
+                
+                return True
+        return False
 
     def create_menu(self):
         """Crea el menú principal"""
@@ -1097,32 +1410,48 @@ class McControlApp:
 
         # Universo de comandos
         all_commands = list(self.command_configs.keys())
-        current_commands = set(mc_data.get("command_configs", {}).keys())
+        # Contar instancias actuales de cada comando
+        current_commands = list(mc_data.get("command_configs", {}).keys())
+        command_counts = {}
+        for cmd in all_commands:
+            # Contar instancias: buscar keys que sean exactamente cmd o que empiecen con "cmd#"
+            count = 0
+            for key in current_commands:
+                base_cmd = key.split('#')[0] if '#' in key else key
+                if base_cmd == cmd:
+                    count += 1
+            command_counts[cmd] = count
 
         modal = tk.Toplevel(self.root)
         modal.title("Gestionar Comandos")
         modal.transient(self.root)
         modal.grab_set()
-        modal.geometry("400x520")
         modal.resizable(False, False)
         modal.configure(bg="#f7f7f7")
 
-        # Centrar modal en pantalla
-        modal.update_idletasks()
-        x = (modal.winfo_screenwidth() // 2) - (400 // 2)
-        y = (modal.winfo_screenheight() // 2) - (520 // 2)
-        modal.geometry(f"+{x}+{y}")
-
+        # Usar el método helper para centrar
+        self.center_modal_on_parent(modal, 400, 520)  # <-- CAMBIO AQUÍ
+        
         tk.Label(modal, text="Gestionar comandos del microcontrolador", font=("Arial", 12, "bold"), bg="#f7f7f7").pack(pady=(20, 10))
 
-        cb_frame = tk.Frame(modal, bg="#f7f7f7")
-        cb_frame.pack(fill="both", expand=True, padx=20, pady=10)
+       # Frame con scroll para la lista de comandos
+        canvas_frame = tk.Frame(modal, bg="#f7f7f7")
+        canvas_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # Variables para los checkboxes
+        canvas = tk.Canvas(canvas_frame, bg="#f7f7f7", highlightthickness=0)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        cb_frame = tk.Frame(canvas, bg="#f7f7f7")
+
+        cb_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=cb_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Variables para los checkboxes e instancias
         command_vars = {}
-        for cmd_name in all_commands:
-            var = tk.BooleanVar(value=cmd_name in current_commands)
-            command_vars[cmd_name] = var
+        instance_vars = {}
 
         # Checkbox seleccionar/deseleccionar todos
         select_all_var = tk.BooleanVar(value=False)
@@ -1131,41 +1460,90 @@ class McControlApp:
             for var in command_vars.values():
                 var.set(value)
 
+        header_frame = tk.Frame(cb_frame, bg="#f7f7f7")
+        header_frame.pack(fill="x", pady=(0, 8))
+
         select_all_cb = tk.Checkbutton(
-            cb_frame,
+            header_frame,
             text="Seleccionar/Deseleccionar todos",
             variable=select_all_var,
             command=toggle_all,
             anchor="w",
             bg="#f7f7f7",
-            font=("Arial", 10, "bold")
+            font=("Arial", 10, "bold"),
+            width=35
         )
-        select_all_cb.pack(fill="x", pady=(0, 8))
+        select_all_cb.grid(row=0, column=0, sticky="w")
 
-        # Listado de comandos con checkboxes
+        tk.Label(header_frame, text="Instancias", font=("Arial", 10, "bold"), bg="#f7f7f7").grid(row=0, column=1, padx=(10, 0))
+
+        # Listado de comandos con checkboxes e inputs de instancias
         for cmd_name in all_commands:
-            cb = tk.Checkbutton(cb_frame, text=cmd_name, variable=command_vars[cmd_name], anchor="w", bg="#f7f7f7")
-            cb.pack(fill="x", pady=2)
+            var = tk.BooleanVar(value=command_counts[cmd_name] > 0)
+            command_vars[cmd_name] = var
+            
+            instance_var = tk.IntVar(value=max(1, command_counts[cmd_name]))
+            instance_vars[cmd_name] = instance_var
+
+            row_frame = tk.Frame(cb_frame, bg="#f7f7f7")
+            row_frame.pack(fill="x", pady=2)
+
+            cb = tk.Checkbutton(row_frame, text=cmd_name, variable=var, anchor="w", bg="#f7f7f7", width=35)
+            cb.grid(row=0, column=0, sticky="w")
+
+            spinbox = tk.Spinbox(
+                row_frame,
+                from_=1,
+                to=100,
+                textvariable=instance_var,
+                width=5,
+                justify="center"
+            )
+            spinbox.grid(row=0, column=1, padx=(10, 0))
 
         btn_frame = tk.Frame(modal, bg="#f7f7f7")
         btn_frame.pack(fill="x", pady=(20, 20))
 
         def aceptar():
-            selected_cmds = [cmd for cmd, var in command_vars.items() if var.get()]
-            current_order = list(mc_data.get("command_configs", {}).keys())
-            new_order = [cmd for cmd in current_order if cmd in selected_cmds]
-            nuevos = [cmd for cmd in selected_cmds if cmd not in current_order]
-            new_order.extend(nuevos)
-            new_command_configs = {cmd: self.command_configs[cmd] for cmd in new_order}
+            # Construir nueva lista de comandos con repeticiones
+            new_command_list = []
+            
+            for cmd in all_commands:
+                if command_vars[cmd].get():  # Si está seleccionado
+                    instances = instance_vars[cmd].get()
+                    for _ in range(instances):
+                        new_command_list.append(cmd)
+            
+            # Construir command_configs manteniendo el orden y permitiendo duplicados
+            new_command_configs = {}
+            for i, cmd in enumerate(new_command_list):
+                # Usar un key único para cada instancia
+                if new_command_list.count(cmd) > 1:
+                    # Contar cuántas veces ya apareció este comando
+                    count_before = new_command_list[:i].count(cmd)
+                    key = f"{cmd}#{count_before + 1}"
+                else:
+                    key = cmd
+                new_command_configs[key] = self.command_configs[cmd]
+            
             mc_data["command_configs"] = new_command_configs
 
+            # Actualizar last_state
             last_state = mc_data.get("last_state", {})
-            for cmd in nuevos:
-                last_state[cmd] = ""
-            for cmd in list(last_state.keys()):
-                if cmd not in new_order:
-                    del last_state[cmd]
-            mc_data["last_state"] = last_state
+            new_last_state = {}
+            for key in new_command_configs.keys():
+                # Extraer el comando base (sin el #N)
+                base_cmd = key.split('#')[0] if '#' in key else key
+                # Si ya existía un estado para este comando, mantenerlo
+                if key in last_state:
+                    new_last_state[key] = last_state[key]
+                elif base_cmd in last_state:
+                    new_last_state[key] = last_state[base_cmd]
+                else:
+                    new_last_state[key] = ""
+            
+            # Limpiar estados de comandos que ya no existen
+            mc_data["last_state"] = new_last_state
 
             self.update_db_stats()
             self.rebuild_command_table()
@@ -1177,160 +1555,64 @@ class McControlApp:
         cancelar_btn = tk.Button(btn_frame, text="Cancelar", font=("Arial", 10, "bold"), bg="#e74c3c", fg="white", command=modal.destroy)
         cancelar_btn.pack(side="right", padx=(10, 40), ipadx=10)
 
-    def process_command_form(self, command, num_executions, time_interval):
-        """Procesa el formulario de comandos con los datos ingresados"""
-        # ...el resto del método igual, pero elimina las líneas:
-        # num_executions = self.executions_var.get()
-        # time_interval = self.interval_var.get()
-        # Obtener datos del formulario
-
-        selected_mc_display = self.mc_var.get()
-        selected_mc = self.get_mac_from_selection(selected_mc_display)
-        selected_command = command
-
-        # Obtener MAC origen (del host hacia el MC) y interface destino
-        mac_origen = None
-        interface = None
-        label = None
-
-        for mac_src, data in self.mc_registered.items():
-            if data.get("mac_destiny") == selected_mc:
-                mac_origen = mac_src
-                interface = data.get("interface_destiny")
-                label = data.get("label")
-                break
-
-        # Validaciones
-        if not mac_origen:
-            messagebox.showwarning(
-                "Validación", "Mac de origen sin mapear con mac de destino"
-            )
-            return
-
-        if not interface:
-            messagebox.showwarning("Validación", "Interfaz de destino no encontrada")
-            return
-
-        if not selected_command or selected_command == "Seleccione un comando...":
-            messagebox.showwarning("Validación", "Debe seleccionar un tipo de comando")
-            return
-
-        if not selected_mc:
-            if not messagebox.askyesno(
-                "Sin Micro Controladores",
-                "No hay Micro Controladores seleccionados. ¿Continuar con comando general?",
-            ):
-                return
-
-        if num_executions < 1:
-            messagebox.showwarning(
-                "Validación", "El número de ejecuciones debe ser mayor a 0"
-            )
-            return
-
-        if time_interval < 0.1:
-            messagebox.showwarning(
-                "Validación", "El intervalo debe ser mayor a 0.1 segundos"
-            )
-            return
-
-        # Obtener el valor del diccionario
-        command_value = self.commands.get(selected_command)
-
-        # Mostrar información
-        info_message = f"""
-    Comando a ejecutar: {selected_command}
-    Apéndice: {command_value}
-    Micro Controladores objetivo: {label} | {selected_mc}
-    Interfaz de envío: {interface}
-    Número de ejecuciones: {num_executions}
-    Intervalo entre ejecuciones: {time_interval} segundos
-    Tiempo total estimado: {num_executions * time_interval:.1f} segundos
-        """.strip()
-
-        if messagebox.askyesno("Confirmar Ejecución", info_message):
-            # Mostrar en el área de respuestas
-            self.add_response(f"FORMULARIO PROCESADO:")
-            self.add_response(
-                f"Comando: {selected_command} | Apéndice: {command_value}"
-            )
-            self.add_response(f"MC Objetivo: {label} | {selected_mc}")
-            self.add_response(f"Interfaz: {interface}")
-            self.add_response(
-                f"Ejecuciones: {num_executions}, Intervalo: {time_interval}s"
-            )
-            self.add_response("─" * 50)
-
-            def process_form():
-                try:
-                    mac_origen_bytes = bytes.fromhex(mac_origen.replace(":", ""))
-                    mac_destino_bytes = bytes.fromhex(selected_mc.replace(":", ""))
-                    payload_length = 7
-                    length_bytes = payload_length.to_bytes(2, byteorder="big")
-                    padding_bytes = b"\x00\x00\x00\x00"
-                    constant_bytes = b"\x02\x03"
-                    appendix = appendix_dict.get(selected_command)
-
-                    packet = (
-                        mac_destino_bytes
-                        + mac_origen_bytes
-                        + length_bytes
-                        + padding_bytes
-                        + constant_bytes
-                        + appendix
-                    )
-
-                    # Enviar paquete
-                    scapy_packet = Raw(load=packet)
-                    sendp(scapy_packet, iface=interface, verbose=False)
-
-                    self.add_response(f"Comando enviado vía {interface}")
-
-                except Exception as e:
-                    self.add_response(f"Error: {str(e)}")
-
-            # Ejecutar múltiples veces con intervalo
-            for i in range(num_executions):
-                if i > 0:
-                    time.sleep(time_interval)
-                threading.Thread(target=process_form, daemon=True).start()
-                self.add_response(f"→ Ejecución {i+1}/{num_executions}")
-
-    def update_switch_state(self, switch_name, is_on, state_label):
-        """Actualiza el estado final del switch después del delay"""
-        if is_on:
-            print(f"{switch_name} Encendido")
-            state_label.config(text="Encendido", fg="green")
-            self.add_response(f"✓ {switch_name} Encendido")
-        else:
-            print(f"{switch_name} Apagado")
-            state_label.config(text="Apagado", fg="red")
-            self.add_response(f"✗ {switch_name} Apagado")
-
+    def center_modal_on_parent(self, modal, width, height):
+        """Centra un modal sobre la ventana principal (parent)
+        
+        Args:
+            modal: Ventana Toplevel a centrar
+            width: Ancho del modal
+            height: Alto del modal
+        """
+        modal.update_idletasks()
+        
+        # Obtener posición y tamaño de la ventana principal
+        parent_x = self.root.winfo_x()
+        parent_y = self.root.winfo_y()
+        parent_width = self.root.winfo_width()
+        parent_height = self.root.winfo_height()
+        
+        # Calcular posición centrada sobre el parent
+        x = parent_x + (parent_width // 2) - (width // 2)
+        y = parent_y + (parent_height // 2) - (height // 2)
+        
+        modal.geometry(f"{width}x{height}+{x}+{y}")
+    
     def toggle_command_state(self, cmd_name, state):
-        """Maneja el toggle de botones ON/OFF para cada comando"""
+        """Maneja el toggle de botones ON/OFF/HIGH/LOW/GLOBAL/LOCAL para cada comando"""
         cmd_state = self.commands_state[cmd_name]
         on_btn = cmd_state["on_btn"]
-        off_btn = cmd_state["off_btn"]
+        off_btn = cmd_state.get("off_btn")  # Puede ser None
+
+        # Obtener las keys del comando
+        base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+        btn_keys = list(self.command_configs[base_cmd].keys())
+        btn1_text = btn_keys[0] if len(btn_keys) > 0 else "ON"
+        btn2_text = btn_keys[1] if len(btn_keys) > 1 else "OFF"
+        
+        # Comandos de un solo botón
+        single_button_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
 
         # Si presiona el mismo botón que ya está activo, desactivarlo
         if cmd_state["state"] == state:
             cmd_state["state"] = None
             on_btn.config(bg="#e0e0e0", relief="raised")
-            off_btn.config(bg="#e0e0e0", relief="raised")
+            if off_btn:
+                off_btn.config(bg="#e0e0e0", relief="raised")
             self.add_response(f"🔘 {cmd_name}: Desactivado")
         else:
             # Activar el botón presionado
             cmd_state["state"] = state
 
-            if state == "ON":
+            if state == btn1_text:  # Botón 1 (ON/HIGH/GLOBAL)
                 on_btn.config(bg="#27ae60", relief="sunken")
-                off_btn.config(bg="#e0e0e0", relief="raised")
-                self.add_response(f"✓ {cmd_name}: ON seleccionado")
-            else:  # OFF
-                off_btn.config(bg="#e74c3c", relief="sunken")
+                if off_btn:
+                    off_btn.config(bg="#e0e0e0", relief="raised")
+                self.add_response(f"✓ {cmd_name}: {state} seleccionado")
+            elif not (base_cmd in single_button_commands):  # Botón 2 (solo si existe)
+                if off_btn:
+                    off_btn.config(bg="#e74c3c", relief="sunken")
                 on_btn.config(bg="#e0e0e0", relief="raised")
-                self.add_response(f"✗ {cmd_name}: OFF seleccionado")
+                self.add_response(f"✗ {cmd_name}: {state} seleccionado")
 
     def send_selected_commands(self):
         """Envía todos los comandos seleccionados con delta de tiempo en el orden visual configurado"""
@@ -1344,34 +1626,39 @@ class McControlApp:
             )
             return
         
-        # Guardar delta_time en el MC seleccionado
+        # Guardar delta_time y estados en el MC seleccionado
         delta_time = self.delta_time_var.get()
         for mc_key, mc_data in self.mc_registered.items():
             if mc_data.get("mac_destiny") == selected_mc:
-                mc_data["delta_time"] = delta_time  # Guarda el valor en el MC
-                # Guardar estado solo para los comandos presentes en command_configs
+                mc_data["delta_time"] = delta_time
                 command_configs = mc_data.get("command_configs", {})
                 last_state = {}
+                
+                # Comandos automáticos
+                auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
+                repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
+                
                 for cmd_name in command_configs.keys():
-                    last_state[cmd_name] = self.commands_state.get(cmd_name, {}).get("state", "")
+                    base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+                    cmd_state = self.commands_state.get(cmd_name, {})
+                    
+                    # Para comandos automáticos, guardar "ON" si está enabled
+                    if base_cmd in auto_commands:
+                        if cmd_state.get("enabled", tk.BooleanVar()).get():
+                            last_state[cmd_name] = "ON"
+                        else:
+                            last_state[cmd_name] = ""
+                    else:
+                        # Para comandos normales, guardar el estado seleccionado
+                        last_state[cmd_name] = cmd_state.get("state", "")
+                    
+                    # Guardar repeticiones si aplica
+                    if base_cmd in repeatable_commands and "repetitions" in cmd_state:
+                        last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
+                
                 mc_data["last_state"] = last_state
                 break
 
-        # Guardar en la base de datos
-        self.update_db_stats()
-        
-        # Buscar el microcontrolador en mc_registered
-        for mc_key, mc_data in self.mc_registered.items():
-            if mc_data.get("mac_destiny") == selected_mc:
-                # Guardar estado solo para los comandos presentes en command_configs
-                command_configs = mc_data.get("command_configs", {})
-                last_state = {}
-                for cmd_name in command_configs.keys():
-                    last_state[cmd_name] = self.commands_state.get(cmd_name, {}).get("state", "")
-                self.mc_registered[mc_key]["last_state"] = last_state
-                break
-
-        # Guardar en la base de datos
         self.update_db_stats()
 
         # Obtener MAC origen e interfaz
@@ -1388,20 +1675,48 @@ class McControlApp:
             messagebox.showwarning("Validación", "MC no está registrado correctamente")
             return
 
+        # Comandos automáticos
+        auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
+        # Comandos que se pueden repetir
+        repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
+    
         # Recolectar comandos habilitados en el orden visual
         commands_to_send = []
         for row in self.command_rows:
             cmd_name = row["cmd_name"]
             cmd_state = self.commands_state[cmd_name]
-            if cmd_state["enabled"].get() and cmd_state["state"]:
-                appendix_key = self.command_configs[cmd_name][cmd_state["state"]]
-                commands_to_send.append(
-                    {
-                        "name": cmd_name,
-                        "state": cmd_state["state"],
-                        "appendix_key": appendix_key,
-                    }
-                )
+            base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+            
+            # Para comandos automáticos, solo verificar si está enabled
+            if base_cmd in auto_commands:
+                if cmd_state["enabled"].get():
+                    appendix_key = self.command_configs[base_cmd]["ON"]
+                    
+                    # Obtener número de repeticiones si aplica
+                    repetitions = 1
+                    if base_cmd in repeatable_commands and "repetitions" in cmd_state:
+                        repetitions = cmd_state["repetitions"].get()
+                    
+                    commands_to_send.append(
+                        {
+                            "name": cmd_name,
+                            "state": "ON",
+                            "appendix_key": appendix_key,
+                            "repetitions": repetitions,
+                        }
+                    )
+            else:
+                # Para comandos normales, verificar enabled y state
+                if cmd_state["enabled"].get() and cmd_state["state"]:
+                    appendix_key = self.command_configs[base_cmd][cmd_state["state"]]
+                    commands_to_send.append(
+                        {
+                            "name": cmd_name,
+                            "state": cmd_state["state"],
+                            "appendix_key": appendix_key,
+                            "repetitions": 1,
+                        }
+                    )
 
         if not commands_to_send:
             messagebox.showwarning("Validación", "Debe seleccionar al menos un comando")
@@ -1410,14 +1725,10 @@ class McControlApp:
         # Obtener delta de tiempo
         delta_time = self.delta_time_var.get()
 
-        # Confirmación
-        cmd_list = "\n".join(
-            [f"  • {c['name']}: {c['state']}" for c in commands_to_send]
-        )
         # Confirmación solo si el checkbox está marcado
         if self.show_summary_var.get():
             cmd_list = "\n".join(
-                [f"  • {c['name']}: {c['state']}" for c in commands_to_send]
+                [f"  • {c['appendix_key']}" for c in commands_to_send]
             )
             info_msg = f"""
     Se enviarán {len(commands_to_send)} comando(s):
@@ -1431,10 +1742,58 @@ class McControlApp:
             if not messagebox.askyesno("Ventana Resumen", info_msg):
                 return
 
+        # Cambiar botón a modo "Cancelar"
+        self.sending_commands = True
+        self.cancel_sending = False
+        self.send_commands_btn.config(text="⏹ Cancelar", bg="#e74c3c")
+
         self.add_response("=" * 50)
         self.add_response(f"📡 Enviando {len(commands_to_send)} comando(s)")
 
-        def send_command_packet(cmd_info, index, total):
+        # Enviar comandos con delay
+        def send_all():
+            cmd_index = 1
+            total_commands = sum(c["repetitions"] for c in commands_to_send)
+            
+            for cmd_info in commands_to_send:
+                repetitions = cmd_info["repetitions"]
+                
+                for rep in range(repetitions):
+                    # Verificar cancelación
+                    if self.cancel_sending:
+                        self.add_response(f"⚠️ Envío cancelado después de {cmd_index-1}/{total_commands} comandos")
+                        break
+                    
+                    if cmd_index > 1:
+                        # Verificar cancelación durante el delay
+                        for _ in range(int(delta_time * 10)):
+                            if self.cancel_sending:
+                                self.add_response(f"⚠️ Envío cancelado después de {cmd_index-1}/{total_commands} comandos")
+                                break
+                            time.sleep(0.1)
+                        
+                        if self.cancel_sending:
+                            break
+                    
+                    # Mostrar número de repetición si aplica
+                    rep_info = f" (rep {rep+1}/{repetitions})" if repetitions > 1 else ""
+                    send_command_packet(cmd_info, cmd_index, total_commands, rep_info)
+                    cmd_index += 1
+                
+                if self.cancel_sending:
+                    break
+
+            if not self.cancel_sending:
+                self.add_response("✓ Todos los comandos enviados")
+            
+            self.add_response("=" * 50)
+            
+            # Restaurar botón
+            self.sending_commands = False
+            self.cancel_sending = False
+            self.send_commands_btn.config(text="Enviar Comandos", bg="#3498db")
+        
+        def send_command_packet(cmd_info, index, total, rep_info=""):
             """Envía un paquete individual"""
             try:
                 appendix = appendix_dict.get(cmd_info["appendix_key"])
@@ -1461,21 +1820,11 @@ class McControlApp:
                 sendp(scapy_packet, iface=interface, verbose=False)
 
                 self.add_response(
-                    f"✓ [{index}/{total}] {cmd_info['name']} {cmd_info['state']} enviado"
+                    f"✓ [{index}/{total}] {cmd_info['appendix_key']}{rep_info} enviado"
                 )
 
             except Exception as e:
-                self.add_response(f"✗ Error en {cmd_info['name']}: {str(e)}")
-
-        # Enviar comandos con delay
-        def send_all():
-            for i, cmd_info in enumerate(commands_to_send, 1):
-                if i > 1:
-                    time.sleep(delta_time)
-                send_command_packet(cmd_info, i, len(commands_to_send))
-
-            self.add_response("✓ Todos los comandos enviados")
-            self.add_response("=" * 50)
+                self.add_response(f"✗ Error en {cmd_info['appendix_key']}: {str(e)}")
 
         # Ejecutar en thread
         threading.Thread(target=send_all, daemon=True).start()
@@ -1659,7 +2008,6 @@ class McControlApp:
         self.response_text.insert(tk.END, f"[{timestamp}] {response}\n")
         self.response_text.see(tk.END)
 
-    
     # Metodos para la db #
     def update_db_stats(self):
         """Actualiza o inserta los datos de microcontroladores registrados en db.json"""

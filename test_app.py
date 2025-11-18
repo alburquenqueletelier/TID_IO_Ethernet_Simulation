@@ -5,8 +5,11 @@ import sys
 import os
 
 # Agregar el directorio actual al path para importar sensor_control_app
+# Nota: La convención es que el archivo de aplicación principal es sensor_control_app.py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 🚨 Asegúrate de que el nombre del archivo es 'sensor_control_app.py' y que la clase es 'McControlApp'
+# Si tu clase está en sensor_control_app.py, el import es correcto:
 from sensor_control_app import McControlApp
 
 
@@ -16,8 +19,9 @@ class TestScrollAndDragDrop(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Configuración inicial para todos los tests"""
+        # Crear la raíz y ocultarla (necesario para Xvfb)
         cls.root = tk.Tk()
-        cls.root.withdraw()  # Ocultar ventana durante tests
+        cls.root.withdraw()
 
     @classmethod
     def tearDownClass(cls):
@@ -26,7 +30,9 @@ class TestScrollAndDragDrop(unittest.TestCase):
 
     def setUp(self):
         """Configuración antes de cada test"""
+        # Instanciar la aplicación
         self.app = McControlApp(self.root)
+        # Forzar el renderizado inicial de todos los widgets (muy importante para Tkinter en tests)
         self.root.update_idletasks()
 
     def tearDown(self):
@@ -36,12 +42,14 @@ class TestScrollAndDragDrop(unittest.TestCase):
             self.app.mc_registered.clear()
         if hasattr(self.app, 'command_rows'):
             self.app.command_rows.clear()
+        
+        # Destruir la instancia de la aplicación para aislar tests
+        # Si McControlApp tiene un método .destroy(), úsalo aquí.
 
     # ==================== TESTS DE SCROLL ====================
 
     def test_dashboard_scroll_exists(self):
         """Verifica que el canvas del dashboard tenga scroll configurado"""
-        # Buscar el canvas en la pestaña dashboard
         dashboard_frame = self.app.notebook.nametowidget(self.app.notebook.tabs()[0])
         
         canvas = None
@@ -56,14 +64,10 @@ class TestScrollAndDragDrop(unittest.TestCase):
         self.assertIsNotNone(canvas, "Canvas del dashboard no encontrado")
         self.assertIsNotNone(scrollbar, "Scrollbar del dashboard no encontrado")
         
-        # Verificar que el scrollbar está conectado al canvas
-        # scrollbar.cget('command') devuelve un string como '139895404711040yview'
-        # Verificamos que termine en 'yview' y que el canvas tenga yscrollcommand configurado
         command = scrollbar.cget('command')
         self.assertTrue(str(command).endswith('yview'), 
                     f"Scrollbar command no está configurado correctamente: {command}")
         
-        # Verificar que el canvas tiene yscrollcommand configurado
         yscrollcommand = canvas.cget('yscrollcommand')
         self.assertIsNotNone(yscrollcommand, "Canvas yscrollcommand no está configurado")
         self.assertNotEqual(yscrollcommand, '', "Canvas yscrollcommand está vacío")
@@ -81,10 +85,7 @@ class TestScrollAndDragDrop(unittest.TestCase):
         
         self.assertIsNotNone(canvas, "Canvas del dashboard no encontrado")
         
-        # Verificar bindings de scroll
         bindings = canvas.bind()
-        
-        # Verificar que existe al menos un binding de mousewheel
         has_mousewheel = any('<MouseWheel>' in str(b) or '<Button-4>' in str(b) or '<Button-5>' in str(b) 
                             for b in bindings)
         
@@ -92,7 +93,6 @@ class TestScrollAndDragDrop(unittest.TestCase):
 
     def test_commands_scroll_exists(self):
         """Verifica que el canvas de comandos tenga scroll configurado"""
-        # Buscar el canvas en la pestaña de comandos
         commands_frame = self.app.notebook.nametowidget(self.app.notebook.tabs()[1])
         
         canvas = None
@@ -107,12 +107,10 @@ class TestScrollAndDragDrop(unittest.TestCase):
         self.assertIsNotNone(canvas, "Canvas de comandos no encontrado")
         self.assertIsNotNone(scrollbar, "Scrollbar de comandos no encontrado")
         
-        # Verificar que el scrollbar está conectado al canvas
         command = scrollbar.cget('command')
         self.assertTrue(str(command).endswith('yview'), 
                     f"Scrollbar command no está configurado correctamente: {command}")
         
-        # Verificar que el canvas tiene yscrollcommand configurado
         yscrollcommand = canvas.cget('yscrollcommand')
         self.assertIsNotNone(yscrollcommand, "Canvas yscrollcommand no está configurado")
         self.assertNotEqual(yscrollcommand, '', "Canvas yscrollcommand está vacío")
@@ -129,7 +127,6 @@ class TestScrollAndDragDrop(unittest.TestCase):
         
         self.assertIsNotNone(canvas, "Canvas de comandos no encontrado")
         
-        # Verificar bindings de scroll
         bindings = canvas.bind()
         
         has_mousewheel = any('<MouseWheel>' in str(b) or '<Button-4>' in str(b) or '<Button-5>' in str(b) 
@@ -149,10 +146,8 @@ class TestScrollAndDragDrop(unittest.TestCase):
         
         self.assertIsNotNone(canvas, "Canvas del dashboard no encontrado")
         
-        # Forzar actualización
         self.root.update_idletasks()
         
-        # Verificar que scrollregion está configurado
         scrollregion = canvas.cget('scrollregion')
         self.assertIsNotNone(scrollregion, "Scrollregion no está configurado")
         self.assertNotEqual(scrollregion, '', "Scrollregion está vacío")
@@ -193,11 +188,21 @@ class TestScrollAndDragDrop(unittest.TestCase):
         
         # Actualizar lista de MCs
         self.app.mc_combo['values'] = self.app.get_mc_display_list()
+        self.root.update_idletasks() # Forzar actualización del Combobox
+        
+        # Seleccionar la MAC de prueba
         self.app.mc_var.set(self.app.get_mc_display_list()[0])
         
-        # Reconstruir tabla de comandos
-        self.app.rebuild_command_table()
-        self.root.update_idletasks()
+        # 🚨 SIMULAR LA INTERACCIÓN DEL USUARIO para que se ejecute el handler de la Combobox
+        # Asume que el cambio de mc_var.set() no dispara el handler, sino el evento.
+        try:
+             self.app.mc_combo.event_generate('<<ComboboxSelected>>')
+        except tk.TclError:
+             # Si falla la generación del evento (raro), intentamos llamar a la función directamente
+             print("Warning: Failed to generate <<ComboboxSelected>> event.")
+             self.app.rebuild_command_table()
+        
+        self.root.update_idletasks() # Forzar el renderizado después de la carga
         
         # Verificar que hay filas
         self.assertGreater(len(self.app.command_rows), 0, 
@@ -214,6 +219,8 @@ class TestScrollAndDragDrop(unittest.TestCase):
                 has_binding = any(binding in str(b) for b in bindings)
                 self.assertTrue(has_binding, 
                               f"Binding {binding} no encontrado en fila de comando")
+
+    # ... (resto de los tests permanecen iguales) ...
 
     def test_reorder_commands_with_valid_data(self):
         """Verifica que reorder_commands funcione con datos válidos"""
@@ -232,10 +239,17 @@ class TestScrollAndDragDrop(unittest.TestCase):
             }
         }
         
-        # Actualizar y seleccionar MC
+        # Actualizar y seleccionar MC (con simulación de evento)
         self.app.mc_combo['values'] = self.app.get_mc_display_list()
         self.app.mc_var.set(self.app.get_mc_display_list()[0])
-        self.app.rebuild_command_table()
+        self.root.update_idletasks() 
+
+        try:
+             self.app.mc_combo.event_generate('<<ComboboxSelected>>')
+        except tk.TclError:
+             print("Warning: Failed to generate <<ComboboxSelected>> event.")
+             self.app.rebuild_command_table()
+
         self.root.update_idletasks()
         
         # Obtener orden inicial
@@ -250,14 +264,18 @@ class TestScrollAndDragDrop(unittest.TestCase):
             new_order = [row['cmd_name'] for row in self.app.command_rows]
             self.assertNotEqual(initial_order, new_order, 
                               "El orden no cambió después de reordenar")
+        else:
+             # Si no hay suficientes comandos, la prueba pasa (asumiendo que la lógica es probada en otro lugar)
+             pass 
 
     def test_drag_state_variables(self):
         """Verifica que las variables de estado de drag existan"""
-        # Simular inicio de drag
+        # Simular inicio de drag (necesita un frame real)
         test_frame = tk.Frame(self.root)
         self.app.setup_drag_and_drop(test_frame, "TEST_CMD")
+        test_frame.destroy() # Limpieza
         
-        # Estas variables se crean al iniciar drag
+        # Estas variables se crean al iniciar drag (deben ser inicializadas en el constructor)
         self.assertTrue(hasattr(self.app, 'dragging'), 
                        "Variable dragging no existe")
         self.assertTrue(hasattr(self.app, 'drag_source'), 
@@ -280,11 +298,18 @@ class TestScrollAndDragDrop(unittest.TestCase):
             }
         }
         
-        # Cambiar a pestaña de comandos
+        # Simulación de selección
         self.app.notebook.select(1)
         self.app.mc_combo['values'] = self.app.get_mc_display_list()
         self.app.mc_var.set(self.app.get_mc_display_list()[0])
-        self.app.rebuild_command_table()
+        self.root.update_idletasks()
+        
+        try:
+             self.app.mc_combo.event_generate('<<ComboboxSelected>>')
+        except tk.TclError:
+             print("Warning: Failed to generate <<ComboboxSelected>> event.")
+             self.app.rebuild_command_table()
+
         self.root.update_idletasks()
         
         # Obtener canvas de comandos
@@ -326,10 +351,17 @@ class TestScrollAndDragDrop(unittest.TestCase):
             }
         }
         
-        # Seleccionar MC y construir tabla
+        # Seleccionar MC y construir tabla (simulando evento)
         self.app.mc_combo['values'] = self.app.get_mc_display_list()
         self.app.mc_var.set(self.app.get_mc_display_list()[0])
-        self.app.rebuild_command_table()
+        self.root.update_idletasks()
+
+        try:
+             self.app.mc_combo.event_generate('<<ComboboxSelected>>')
+        except tk.TclError:
+             print("Warning: Failed to generate <<ComboboxSelected>> event.")
+             self.app.rebuild_command_table()
+             
         self.root.update_idletasks()
         
         # Obtener canvas
@@ -349,8 +381,8 @@ class TestScrollAndDragDrop(unittest.TestCase):
         self.app.rebuild_command_table()
         self.root.update_idletasks()
         
-        # Esperar a que bind_scroll_to_new_rows se ejecute
-        self.root.after(200)
+        # Esperar un poco y actualizar (por si hay un after() interno)
+        self.root.after(200, self.root.update_idletasks) # El after() no funciona en CI, pero es buena práctica local
         self.root.update_idletasks()
         
         # Verificar scroll después de rebuild
@@ -361,11 +393,9 @@ class TestScrollAndDragDrop(unittest.TestCase):
 
 def run_tests():
     """Ejecuta todos los tests y muestra resultados"""
-    # Crear suite de tests
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestScrollAndDragDrop)
     
-    # Ejecutar tests con verbose output
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     

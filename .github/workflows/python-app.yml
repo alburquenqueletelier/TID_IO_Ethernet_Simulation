@@ -46,6 +46,3 @@ jobs:
       run: |
         # Ejecutar pruebas dentro de la pantalla virtual simulada
         xvfb-run pytest
-      run: |
-        # Ejecutar pytest dentro de la pantalla virtual para que Tkinter funcione
-        xvfb-run pytest

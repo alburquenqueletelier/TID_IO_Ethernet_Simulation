@@ -73,10 +73,13 @@ class McControlApp:
         self.frames_sent = 0
         self.frames_received = 0
 
-        # Inicializar base de datos
+        # Estado de asociaciones PET
+        self.pet_associations = {}  # {pet_num: {"mc": mac_destiny, "macro": macro_name}}
+        for i in range(1, 11):
+            self.pet_associations[i] = {"mc": None, "macro": None}
+
         self.init_database()
 
-        # Crear interfaz
         self.create_main_interface()
 
     def setup_drag_and_drop(self, row_frame, cmd_name):
@@ -763,6 +766,7 @@ class McControlApp:
         num_pets = 10
 
         self.pet_buttons = []
+        self.pet_tooltips = []  # Lista para mantener referencias a tooltips
 
         for i in range(num_pets):
             angle = (2 * math.pi / num_pets) * i - (math.pi / 2) 
@@ -789,6 +793,9 @@ class McControlApp:
             # Colocar el botón en el canvas
             pet_canvas.create_window(x, y, window=pet_btn)
             self.pet_buttons.append(pet_btn)
+            
+            # Configurar tooltip para este botón
+            self.setup_pet_tooltip(pet_btn, i+1)
 
         # Área de respuestas/log
         response_frame = tk.LabelFrame(
@@ -803,9 +810,269 @@ class McControlApp:
         )
         self.response_text.pack(fill="both", expand=True)
         
+    def setup_pet_tooltip(self, button, pet_num):
+        """Configura el tooltip hover para un botón PET"""
+        tooltip = None
+        
+        def show_tooltip(event):
+            nonlocal tooltip
+            
+            # Obtener información de asociación
+            assoc = self.pet_associations[pet_num]
+            mc_label = "Sin MC"
+            macro_name = "Sin Macro"
+            
+            if assoc["mc"]:
+                # Buscar el label del MC
+                for mc_data in self.mc_registered.values():
+                    if mc_data.get("mac_destiny") == assoc["mc"]:
+                        mc_label = mc_data.get("label", "Sin etiqueta")
+                        break
+            
+            if assoc["macro"]:
+                macro_name = assoc["macro"]
+            
+            # Crear tooltip
+            x = button.winfo_rootx() + button.winfo_width() // 2
+            y = button.winfo_rooty() - 10
+            
+            tooltip = tk.Toplevel(button)
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{x}+{y}")
+            
+            # Frame contenedor con borde
+            frame = tk.Frame(
+                tooltip,
+                background="#2c3e50",
+                relief="solid",
+                borderwidth=1
+            )
+            frame.pack(fill="both", expand=True)
+            
+            # Contenido del tooltip
+            tk.Label(
+                frame,
+                text=f"PET {pet_num}",
+                font=("Arial", 9, "bold"),
+                bg="#2c3e50",
+                fg="white",
+                padx=10,
+                pady=2
+            ).pack()
+            
+            tk.Label(
+                frame,
+                text=f"MC: {mc_label}",
+                font=("Arial", 8),
+                bg="#2c3e50",
+                fg="#ecf0f1",
+                padx=10,
+                pady=1
+            ).pack()
+            
+            tk.Label(
+                frame,
+                text=f"Macro: {macro_name}",
+                font=("Arial", 8),
+                bg="#2c3e50",
+                fg="#ecf0f1",
+                padx=10,
+                pady=2
+            ).pack()
+            
+            # Ajustar posición para que aparezca arriba del botón
+            tooltip.update_idletasks()
+            tooltip_height = tooltip.winfo_height()
+            tooltip.wm_geometry(f"+{x - tooltip.winfo_width()//2}+{y - tooltip_height - 5}")
+        
+        def hide_tooltip(event):
+            nonlocal tooltip
+            if tooltip:
+                tooltip.destroy()
+                tooltip = None
+        
+        button.bind("<Enter>", show_tooltip)
+        button.bind("<Leave>", hide_tooltip)
+
     def on_pet_click(self, pet_num):
-        """Maneja el clic en un botón PET (placeholder)"""
-        self.add_response(f"🔘 PET {pet_num} clickeado")
+        """Maneja el clic en un botón PET - abre modal de configuración"""
+        modal = tk.Toplevel(self.root)
+        modal.title(f"Configurar PET {pet_num}")
+        modal.transient(self.root)
+        modal.grab_set()
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+        
+        self.center_modal_on_parent(modal, 500, 400)
+        
+        # Título
+        tk.Label(
+            modal,
+            text=f"Configurar PET {pet_num}",
+            font=("Arial", 14, "bold"),
+            bg="#f7f7f7"
+        ).pack(pady=(20, 10))
+        
+        # Obtener asociación actual
+        current_assoc = self.pet_associations[pet_num]
+        
+        # Frame principal de contenido
+        content_frame = tk.Frame(modal, bg="#f7f7f7")
+        content_frame.pack(fill="both", expand=True, padx=30, pady=10)
+        
+        # Sección Micro Controlador
+        mc_section = tk.LabelFrame(
+            content_frame,
+            text="Micro Controlador",
+            font=("Arial", 11, "bold"),
+            bg="#f7f7f7"
+        )
+        mc_section.pack(fill="x", pady=(0, 15))
+        
+        mc_frame = tk.Frame(mc_section, bg="#f7f7f7")
+        mc_frame.pack(fill="x", padx=15, pady=10)
+        
+        tk.Label(
+            mc_frame,
+            text="Seleccionar MC:",
+            font=("Arial", 10),
+            bg="#f7f7f7"
+        ).pack(anchor="w", pady=(0, 5))
+        
+        mc_var = tk.StringVar()
+        mc_options = ["Sin MC"] + self.get_mc_display_list()
+        
+        # Establecer valor inicial
+        if current_assoc["mc"]:
+            for option in mc_options:
+                if " | " in option and option.split(" | ")[1] == current_assoc["mc"]:
+                    mc_var.set(option)
+                    break
+        else:
+            mc_var.set("Sin MC")
+        
+        mc_combo = ttk.Combobox(
+            mc_frame,
+            textvariable=mc_var,
+            values=mc_options,
+            state="readonly",
+            width=40
+        )
+        mc_combo.pack(fill="x")
+        
+        # Sección Macro
+        macro_section = tk.LabelFrame(
+            content_frame,
+            text="Macro",
+            font=("Arial", 11, "bold"),
+            bg="#f7f7f7"
+        )
+        macro_section.pack(fill="x", pady=(0, 15))
+        
+        macro_frame = tk.Frame(macro_section, bg="#f7f7f7")
+        macro_frame.pack(fill="x", padx=15, pady=10)
+        
+        tk.Label(
+            macro_frame,
+            text="Seleccionar Macro:",
+            font=("Arial", 10),
+            bg="#f7f7f7"
+        ).pack(anchor="w", pady=(0, 5))
+        
+        macro_var = tk.StringVar()
+        macro_combo = ttk.Combobox(
+            macro_frame,
+            textvariable=macro_var,
+            values=["Sin Macro"],
+            state="readonly",
+            width=40
+        )
+        macro_combo.pack(fill="x")
+        macro_var.set("Sin Macro")
+        
+        # Función para actualizar opciones de macro según MC seleccionado
+        def update_macro_options(*args):
+            selected_mc_display = mc_var.get()
+            
+            if selected_mc_display == "Sin MC" or not selected_mc_display:
+                macro_combo["values"] = ["Sin Macro"]
+                macro_var.set("Sin Macro")
+                return
+            
+            # Obtener MAC del MC seleccionado
+            selected_mc = self.get_mac_from_selection(selected_mc_display)
+            
+            # Buscar macros del MC
+            macros = []
+            for mc_data in self.mc_registered.values():
+                if mc_data.get("mac_destiny") == selected_mc:
+                    macros = list(mc_data.get("macros", {}).keys())
+                    break
+            
+            macro_options = ["Sin Macro"] + macros
+            macro_combo["values"] = macro_options
+            
+            # Mantener selección actual si es válida
+            if current_assoc["macro"] and current_assoc["macro"] in macros:
+                macro_var.set(current_assoc["macro"])
+            else:
+                macro_var.set("Sin Macro")
+        
+        # Vincular cambio de MC con actualización de macros
+        mc_var.trace_add("write", update_macro_options)
+        
+        # Actualizar macros con selección inicial
+        update_macro_options()
+        
+        # Frame de botones
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(fill="x", pady=(10, 20))
+        
+        def guardar():
+            selected_mc_display = mc_var.get()
+            selected_macro = macro_var.get()
+            
+            # Actualizar asociación
+            if selected_mc_display == "Sin MC":
+                self.pet_associations[pet_num]["mc"] = None
+                self.pet_associations[pet_num]["macro"] = None
+            else:
+                selected_mc = self.get_mac_from_selection(selected_mc_display)
+                self.pet_associations[pet_num]["mc"] = selected_mc
+                
+                if selected_macro == "Sin Macro":
+                    self.pet_associations[pet_num]["macro"] = None
+                else:
+                    self.pet_associations[pet_num]["macro"] = selected_macro
+            
+            # TODO: Guardar en db cuando esté definido el formato
+            # self.save_pet_associations_to_db()
+            
+            self.add_response(f"✓ PET {pet_num} configurado correctamente")
+            modal.destroy()
+        
+        guardar_btn = tk.Button(
+            btn_frame,
+            text="Guardar",
+            font=("Arial", 10, "bold"),
+            bg="#27ae60",
+            fg="white",
+            command=guardar,
+            width=10
+        )
+        guardar_btn.pack(side="left", padx=(80, 10))
+        
+        cancelar_btn = tk.Button(
+            btn_frame,
+            text="Cancelar",
+            font=("Arial", 10, "bold"),
+            bg="#e74c3c",
+            fg="white",
+            command=modal.destroy,
+            width=10
+        )
+        cancelar_btn.pack(side="right", padx=(10, 80))
+
 
     def create_commands_tab(self):
         """Crea la pestaña de comandos con scroll corregido"""

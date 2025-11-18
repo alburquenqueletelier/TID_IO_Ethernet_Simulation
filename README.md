@@ -1,65 +1,41 @@
-# TID Gamma Simulation
+# TID 
 
-Este proyecto simula el envío y recepción de tramas de datos entre dispositivos usando Scapy en Python. El experimento consiste en conectar un cable de red desde una computadora hacia si misma. En este caso, se uso la entrada de red para conectar un RJ45 hacia un adaptador de Tipo C hacia ethernet.
+# Aplicación para comunicación entre Computadora y Micro Controlador
 
-## Requisitos
-- Python 3.8+
-- [Scapy](https://scapy.net/) 2.6.1+ (detalles de instalación a continuación)
-- Wireshark 4.0.17
+## Etapa Actual
+
+Aplicación de escritorio que permite vía formulario enviar un comando al microcontrolador. 
+
+En desarrollo...
+
+## Requerimientos
+
+Linux Debian 12 (rellenar con lo del otro doc)
+
+```bash
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.59.2
+kiwisolver==1.4.9
+matplotlib==3.10.6
+numpy==2.3.2
+packaging==25.0
+pillow==11.3.0
+pyparsing==3.2.3
+pyserial==3.5
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.1
+scapy==2.6.1
+six==1.17.0
+```
 
 ## Instalación
-1. Clona el repositorio o descarga los archivos en tu máquina.
-2. Crea un ambiente virtual (o no)
+Con gestor de ambiente venv
 
-```bash
-python3 -m venv .venv # o el nombre que quieras
-source .venv/bin/activate
-```
+1. Crear ambiente si no existe: `python3 -m venv .venv`
+2. Levantar ambiente: `source .venv/bin/activate`
+3. Instalar dependencias: `pip install -r requirements.txt`
+4. Instalar tkinter globalmente (no siempre viene) `sudo apt-get install python3-tk`
 
-3. Instala las dependencias ejecutando:
-
-```bash
-pip install -r requirements.txt
-```
-
-4. Crea un archivo .env y agregale el nombre de las interfaces con sus respectivas MAC.
-```bash
-cp .env.example .env
-```
-
-**Nota:** para ver el nombre y mac de tus interfaces usa `ip a` en linux. Recuerda tener conectada tu computadora con un cable ethernet a sí misma.
-
-## Uso
-1. Ejecuta `destination.py` para monitorear el tráfico de la interfaz ethernet de destino
-    ```bash
-    sudo $(which python) destination.py
-    ```
-2. Abre otra terminal y ejecuta `source.py` para enviar una trama
-    ```bash
-    sudo $(which python) source.py
-    ```
-
-**NOTA:** La librería socket de python requiere de privilegios root para algunas características. El `$(which python)` se usa para que sudo utilice el entorno virtual en lugar del global.
-
-## Visualización 
-Adicional a los registros visibles en la terminal donde corre `destination.py` puedes usar `Wireshark` para monitorear las tramas enviadas o recibidas según la interfaz de red que sniffeas. 
-
-1. Abre Wireshark con privilegios de admin
-`sudo wireshark`
-
-2. Seleccionar la interfaz que quieres monitorear (emisor o receptor)
-3. Vuelve a ejecutar el script de python. Con esto se debería ver la trama.
-
-
-## Estructura del proyecto
-- `source.py`: Script que envía tramas desde la interfaz origen a la de destino.
-- `destination.py`: Script que recibe tramas en bruto, las parsea e imprime en consola.
-- `requirements.txt`: Dependencias del proyecto.
-- `docs/`: Documentación y recursos gráficos.
-
-## Notas
-- El script utiliza direcciones MAC ficticias. Modifícalas según tu entorno si deseas realizar pruebas reales.
-- Se recomienda ejecutar con privilegios de administrador si se requiere acceso a la red física.
-
-## Licencia
-Este proyecto es solo para fines educativos.
+## Ejecución
+Ejecutar: `python3 sensor_control_app.py`

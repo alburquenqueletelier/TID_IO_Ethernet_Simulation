@@ -5,3 +5,7 @@ private/
 docs/para_revision.md
 docs/gant_image.png
 docs/gantt.pdf
+
+db.json
+
+__pycache__/

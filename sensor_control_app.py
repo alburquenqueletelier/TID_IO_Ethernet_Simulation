@@ -11,6 +11,8 @@ import csv
 from scapy.all import Ether, Raw, sendp
 import os
 import json
+import math
+
 
 appendix_dict = {
     "X_00_CPU": b"\x00",
@@ -217,7 +219,6 @@ class McControlApp:
         selected_mc_display = self.mc_var.get()
         selected_mc = self.get_mac_from_selection(selected_mc_display) if selected_mc_display else None
 
-        # TODO: mejorar búsqueda por id O(1) en lugar de O(n)
         # Buscar el MC seleccionado y su orden de comandos
         mc_data = None
         for data in self.mc_registered.values():
@@ -248,7 +249,7 @@ class McControlApp:
         repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
         # Comandos que NO tienen botones (automáticos al marcar checkbox)
         auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
-    
+
         # Recrear filas en el nuevo orden
         for idx, (cmd_name, cmd_config) in enumerate(command_configs.items()):
             if cmd_name not in last_state:
@@ -382,6 +383,56 @@ class McControlApp:
             self.command_rows.append({"frame": row_frame, "cmd_name": cmd_name})
             self.setup_drag_and_drop(row_frame, cmd_name)
 
+        # Vincular scroll a las nuevas filas creadas
+        self.root.after(150, self.bind_scroll_to_new_rows)
+
+    def bind_scroll_to_new_rows(self):
+        """Vincula eventos de scroll a las filas recién creadas de la tabla de comandos"""
+        def bind_mousewheel(widget):
+            widget.bind("<MouseWheel>", self.on_commands_mousewheel)
+            widget.bind("<Button-4>", self.on_commands_mousewheel)
+            widget.bind("<Button-5>", self.on_commands_mousewheel)
+        
+        def bind_to_children(parent):
+            try:
+                bind_mousewheel(parent)
+                for child in parent.winfo_children():
+                    if not isinstance(child, (tk.Spinbox, ttk.Combobox)):
+                        bind_to_children(child)
+            except Exception:
+                pass
+        
+        # Buscar el canvas padre en la pestaña de comandos
+        commands_tab = self.notebook.nametowidget(self.notebook.select())
+        for child in commands_tab.winfo_children():
+            if isinstance(child, tk.Canvas):
+                canvas = child
+                break
+        else:
+            return
+        
+        # Vincular a todas las filas nuevas
+        for row_data in self.command_rows:
+            bind_to_children(row_data["frame"])
+
+    def on_commands_mousewheel(self, event):
+        """Manejador de scroll específico para la pestaña de comandos"""
+        # Buscar el canvas en la pestaña de comandos
+        commands_tab = self.notebook.nametowidget(self.notebook.select())
+        for child in commands_tab.winfo_children():
+            if isinstance(child, tk.Canvas):
+                canvas = child
+                break
+        else:
+            return
+        
+        # Determinar la dirección del scroll
+        if event.num == 5 or (hasattr(event, "delta") and event.delta < 0):
+            canvas.yview_scroll(1, "units")
+        elif event.num == 4 or (hasattr(event, "delta") and event.delta > 0):
+            canvas.yview_scroll(-1, "units")
+        return "break"
+
     def init_database(self):
         """Inicializa el almacenamiento y gestión de estados desde db.json"""
         nombre_archivo = db_json
@@ -436,14 +487,75 @@ class McControlApp:
         self.create_menu()
 
     def create_dashboard_tab(self):
-        """Crea la pestaña del dashboard"""
+        """Crea la pestaña del dashboard con scroll corregido"""
         dashboard_frame = ttk.Frame(self.notebook)
         self.notebook.add(dashboard_frame, text="Dashboard")
+
+        # Canvas con scrollbar para todo el dashboard
+        canvas = tk.Canvas(dashboard_frame, borderwidth=0, highlightthickness=0)
+        scrollbar = tk.Scrollbar(dashboard_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Función para ajustar el ancho del frame interno cuando el canvas cambie de tamaño
+        def configure_canvas_width(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        canvas.bind("<Configure>", configure_canvas_width)
+
+        # Sistema mejorado de scroll con rueda del mouse
+        def bind_mousewheel(widget):
+            """Vincula eventos de scroll a un widget específico"""
+            widget.bind("<MouseWheel>", on_mousewheel)
+            widget.bind("<Button-4>", on_mousewheel)
+            widget.bind("<Button-5>", on_mousewheel)
+
+        def on_mousewheel(event):
+            """Maneja todos los eventos de scroll del mouse"""
+            # Determinar la dirección del scroll
+            if event.num == 5 or (hasattr(event, "delta") and event.delta < 0):
+                canvas.yview_scroll(1, "units")
+            elif event.num == 4 or (hasattr(event, "delta") and event.delta > 0):
+                canvas.yview_scroll(-1, "units")
+            return "break"  # Prevenir propagación del evento
+
+        # Vincular scroll al canvas principal
+        bind_mousewheel(canvas)
+        
+        # Vincular scroll al frame desplazable y a todos sus hijos
+        def bind_to_all_children(parent):
+            """Vincula eventos de scroll recursivamente a todos los widgets hijos"""
+            try:
+                bind_mousewheel(parent)
+                for child in parent.winfo_children():
+                    # No vincular a widgets que tienen su propio scroll
+                    if not isinstance(child, (scrolledtext.ScrolledText, tk.Listbox, tk.Text)):
+                        bind_to_all_children(child)
+            except Exception:
+                pass  # Ignorar errores en widgets que no soportan binding
+
+        # Vincular después de que la UI esté completamente construida
+        def bind_scroll_after_ui():
+            bind_to_all_children(scrollable_frame)
+            # También vincular el canvas mismo (por si acaso)
+            bind_mousewheel(canvas)
+
+        # Programar el binding después de que la UI esté creada
+        self.root.after(100, bind_scroll_after_ui)
 
         ###
         # Frame superior para Gestionar Micro Controladores
         stats_frame = tk.LabelFrame(
-            dashboard_frame,
+            scrollable_frame,  
             text="Panel de gestión de Micro Controladores",
             font=("Arial", 12, "bold"),
         )
@@ -474,7 +586,7 @@ class McControlApp:
             "MAC Destino",
             "Interfaz Destino",
             "Label",
-        )  # <-- AGREGADA COLUMNA
+        )
         self.mc_table = ttk.Treeview(
             table_frame, columns=columns, show="headings", height=5
         )
@@ -508,13 +620,17 @@ class McControlApp:
 
         self.refresh_dashboard_mc_table()
 
-        # FORMULARIO DE REGISTRO
+        # CONTENEDOR PRINCIPAL PARA REGISTRO Y PET SCAN (DIVIDIDO EN 2 COLUMNAS)
+        main_container = tk.Frame(scrollable_frame)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # COLUMNA IZQUIERDA: FORMULARIO DE REGISTRO (50%)
         register_frame = tk.LabelFrame(
-            dashboard_frame,
+            main_container,
             text="Registrar Micro Controlador",
             font=("Arial", 12, "bold"),
         )
-        register_frame.pack(fill="x", padx=10, pady=10)
+        register_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
         form_container = tk.Frame(register_frame)
         form_container.pack(fill="x", padx=10, pady=10)
@@ -567,7 +683,7 @@ class McControlApp:
             font=("Arial", 8),
         ).pack(side="left")
 
-        # Fila 3: Interfaz Destino (NUEVA)
+        # Fila 3: Interfaz Destino
         interface_destino_row = tk.Frame(form_container)
         interface_destino_row.pack(fill="x", pady=5)
 
@@ -592,7 +708,7 @@ class McControlApp:
             font=("Arial", 8),
         ).pack(side="left")
 
-        # Fila 4: Label (antes era Fila 3)
+        # Fila 4: Label
         label_row = tk.Frame(form_container)
         label_row.pack(fill="x", pady=5)
 
@@ -628,9 +744,57 @@ class McControlApp:
         )
         register_btn.pack()
 
+        # COLUMNA DERECHA: PET SCAN (50%)
+        pet_scan_frame = tk.LabelFrame(
+            main_container,
+            text="Pet Scan",
+            font=("Arial", 12, "bold"),
+        )
+        pet_scan_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
+
+        # Canvas para dibujar el círculo de PETs
+        pet_canvas = tk.Canvas(pet_scan_frame, width=450, height=450, bg="white")
+        pet_canvas.pack(padx=20, pady=20)
+
+        # Dibujar 10 rectángulos en círculo        
+        center_x = 225  
+        center_y = 225  
+        radius = 150    
+        num_pets = 10
+
+        self.pet_buttons = []
+
+        for i in range(num_pets):
+            angle = (2 * math.pi / num_pets) * i - (math.pi / 2) 
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+
+            # Crear botón con bordes redondeados
+            pet_btn = tk.Button(
+                pet_canvas,
+                text=f"PET {i+1}",
+                font=("Arial", 9, "bold"),
+                bg="#3498db",
+                fg="white",
+                width=8,
+                height=2,
+                relief="flat",          
+                borderwidth=0,          
+                highlightthickness=2,   
+                highlightbackground="#2980b9",  
+                cursor="hand2",        
+                command=lambda pet_num=i+1: self.on_pet_click(pet_num)
+            )
+            
+            # Colocar el botón en el canvas
+            pet_canvas.create_window(x, y, window=pet_btn)
+            self.pet_buttons.append(pet_btn)
+
         # Área de respuestas/log
         response_frame = tk.LabelFrame(
-            dashboard_frame, text="Respuestas / Log", font=("Arial", 10, "bold")
+            scrollable_frame,
+            text="Respuestas / Log", 
+            font=("Arial", 10, "bold")
         )
         response_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -638,9 +802,13 @@ class McControlApp:
             response_frame, height=8, font=("Consolas", 10)
         )
         self.response_text.pack(fill="both", expand=True)
+        
+    def on_pet_click(self, pet_num):
+        """Maneja el clic en un botón PET (placeholder)"""
+        self.add_response(f"🔘 PET {pet_num} clickeado")
 
     def create_commands_tab(self):
-        """Crea la pestaña de comandos con scroll"""
+        """Crea la pestaña de comandos con scroll corregido"""
         # Frame principal de la pestaña
         commands_tab = ttk.Frame(self.notebook)
         self.notebook.add(commands_tab, text="Comandos")
@@ -657,35 +825,59 @@ class McControlApp:
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        canvas.bind(
-            "<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width)
-        )
-
         canvas_window = canvas.create_window(
             (0, 0), window=scrollable_frame, anchor="nw"
-        )  # <-- GUARDA LA REFERENCIA
+        )
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Scroll con rueda del mouse
-        def _on_mousewheel(event):
-            # Windows y macOS usan event.delta, Linux usa event.num
-            if hasattr(event, "delta"):
-                if event.delta > 0:
-                    canvas.yview_scroll(-1, "units")
-                elif event.delta < 0:
-                    canvas.yview_scroll(1, "units")
-            else:
-                if event.num == 4:
-                    canvas.yview_scroll(-1, "units")
-                elif event.num == 5:
-                    canvas.yview_scroll(1, "units")
+        # Función para ajustar el ancho del frame interno cuando el canvas cambie de tamaño
+        def configure_canvas_width(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        canvas.bind("<Configure>", configure_canvas_width)
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)  # Windows/macOS
-        canvas.bind_all("<Button-4>", _on_mousewheel)  # Linux scroll up
-        canvas.bind_all("<Button-5>", _on_mousewheel)  # Linux scroll down
+        # Sistema mejorado de scroll con rueda del mouse
+        def bind_mousewheel(widget):
+            """Vincula eventos de scroll a un widget específico"""
+            widget.bind("<MouseWheel>", on_mousewheel)
+            widget.bind("<Button-4>", on_mousewheel)
+            widget.bind("<Button-5>", on_mousewheel)
+
+        def on_mousewheel(event):
+            """Maneja todos los eventos de scroll del mouse"""
+            # Determinar la dirección del scroll
+            if event.num == 5 or (hasattr(event, "delta") and event.delta < 0):
+                canvas.yview_scroll(1, "units")
+            elif event.num == 4 or (hasattr(event, "delta") and event.delta > 0):
+                canvas.yview_scroll(-1, "units")
+            return "break"  # Prevenir propagación del evento
+
+        # Vincular scroll al canvas principal
+        bind_mousewheel(canvas)
+        
+        # Vincular scroll al frame desplazable y a todos sus hijos
+        def bind_to_all_children(parent):
+            """Vincula eventos de scroll recursivamente a todos los widgets hijos"""
+            try:
+                bind_mousewheel(parent)
+                for child in parent.winfo_children():
+                    # No vincular a widgets que tienen su propio scroll
+                    if not isinstance(child, (scrolledtext.ScrolledText, tk.Listbox, tk.Text, ttk.Combobox, tk.Spinbox)):
+                        bind_to_all_children(child)
+            except Exception:
+                pass  # Ignorar errores en widgets que no soportan binding
+
+        # Vincular después de que la UI esté completamente construida
+        def bind_scroll_after_ui():
+            bind_to_all_children(scrollable_frame)
+            # También vincular el canvas mismo
+            bind_mousewheel(canvas)
+
+        # Programar el binding después de que la UI esté creada
+        self.root.after(100, bind_scroll_after_ui)
 
         # Select MC Destino (arriba de ambos frames)
         mc_select_frame = tk.Frame(scrollable_frame)
@@ -873,7 +1065,7 @@ class McControlApp:
             relief="raised",
         )
         self.send_commands_btn.pack(pady=(10, 0))
-    
+        
     def toggle_send_commands(self):
         """Alterna entre enviar y cancelar comandos"""
         if self.sending_commands:

@@ -19,29 +19,33 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    
     - name: Set up Python 3.11
       uses: actions/setup-python@v3
       with:
         python-version: "3.11"
+        
     - name: Install Dependencies & Xvfb Setup
-  run: |
-    # 1. Instalar Xvfb (Servidor de pantalla virtual necesario para Tkinter/GUI)
-    sudo apt-get update
-    sudo apt-get install -y xvfb
+      run: |
+        # 1. Instalar Xvfb (Servidor de pantalla virtual para pruebas de Tkinter/GUI)
+        sudo apt-get update
+        sudo apt-get install -y xvfb
+        
+        # 2. Instalación de dependencias de Python
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     
-    # 2. Instalación de dependencias de Python
-    python -m pip install --upgrade pip
-    pip install flake8 pytest
-    if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
     - name: Lint with flake8
       run: |
-        # stop the build if there are Python syntax errors or undefined names
+        # Validar estilo y sintaxis (incluyendo ancho de línea de 127 caracteres)
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     
     - name: Test with pytest (using Xvfb)
+      run: |
+        # Ejecutar pruebas dentro de la pantalla virtual simulada
+        xvfb-run pytest
       run: |
         # Ejecutar pytest dentro de la pantalla virtual para que Tkinter funcione
         xvfb-run pytest

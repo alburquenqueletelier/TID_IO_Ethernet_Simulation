@@ -64,6 +64,10 @@ class McControlApp:
         # Variable para controlar cancelación de envío
         self.sending_commands = False
         self.cancel_sending = False
+        
+        # Variables para envío de comandos PET
+        self.sending_pet_commands = False
+        self.cancel_pet_sending = False
 
         # Contadores y estadísticas
         self.mc_available = {}  # keys: mac_source, values: interfaces
@@ -73,10 +77,16 @@ class McControlApp:
         self.frames_sent = 0
         self.frames_received = 0
 
-        # Inicializar base de datos
+        # Estado de asociaciones PET
+        self.pet_associations = {}  # {pet_num: {"mc": mac_destiny, "enabled": boolean}}
+        for i in range(1, 11):
+            self.pet_associations[i] = {"mc": None, "enabled": False}
+
+        # Macros universales (compartidas entre todos los MCs)
+        self.macros = {}
+
         self.init_database()
 
-        # Crear interfaz
         self.create_main_interface()
 
     def setup_drag_and_drop(self, row_frame, cmd_name):
@@ -226,12 +236,6 @@ class McControlApp:
                 mc_data = data
                 break
 
-        # Cargar delta_time si existe en el MC
-        if mc_data and "delta_time" in mc_data:
-            self.delta_time_var.set(mc_data["delta_time"])
-        else:
-            self.delta_time_var.set(0.5)
-
         # Solo usar los comandos del MC, si no tiene, tabla vacía
         command_configs = mc_data.get("command_configs", {}) if mc_data else {}
         last_state = mc_data.get("last_state", {}) if mc_data else {}
@@ -380,6 +384,31 @@ class McControlApp:
                     bg=bg_color
                 ).grid(row=0, column=col_offset, padx=10)
 
+            # Delta tiempo individual al final (recuperar de last_state o default 1.0)
+            saved_delta = last_state.get(f"{cmd_name}_delta", 1.0)
+            self.commands_state[cmd_name]["delta_time"] = tk.DoubleVar(value=saved_delta)
+            
+            # Label "Delay (s)"
+            tk.Label(
+                row_frame, 
+                text="Delay (s):", 
+                font=("Arial", 8), 
+                bg=bg_color
+            ).grid(row=0, column=col_offset, padx=(5, 2))
+            col_offset += 1
+            
+            delta_spinbox = tk.Spinbox(
+                row_frame,
+                from_=0.1,
+                to=60.0,
+                increment=0.1,
+                textvariable=self.commands_state[cmd_name]["delta_time"],
+                width=6,
+                justify="center",
+                format="%.1f"
+            )
+            delta_spinbox.grid(row=0, column=col_offset, padx=2)
+
             self.command_rows.append({"frame": row_frame, "cmd_name": cmd_name})
             self.setup_drag_and_drop(row_frame, cmd_name)
 
@@ -443,12 +472,29 @@ class McControlApp:
                 with open(nombre_archivo, "r", encoding="utf-8") as f:
                     # Intenta cargar el contenido en self.db
                     self.db = json.load(f)
-                    matched_macs = self.db.get("mc_registered")
+                    matched_macs = self.db.get("mc_registered", {})
                     for mac_origin in matched_macs.keys():
                         self.mc_registered[mac_origin] = matched_macs.get(mac_origin)
+                    
+                    # Cargar macros universales
+                    self.macros = self.db.get("macros", {})
+                    
+                    # Cargar asociaciones de PETs
+                    saved_pet_assoc = self.db.get("pet_associations", {})
+                    if saved_pet_assoc:
+                        # Actualizar pet_associations con los datos guardados
+                        for pet_num_str, assoc_data in saved_pet_assoc.items():
+                            pet_num = int(pet_num_str)
+                            if 1 <= pet_num <= 10:
+                                self.pet_associations[pet_num] = {
+                                    "mc": assoc_data.get("mc"),
+                                    "enabled": assoc_data.get("enabled", False)
+                                }
+                    
+                    # Cargar macro seleccionada (no hacer nada aquí, se carga en create_dashboard_tab)
+                    # Solo asegurarse de que self.db tenga la key si existe
 
                 print(f"Archivo '{nombre_archivo}' cargado exitosamente.")
-
             except json.JSONDecodeError:
                 # Caso: El archivo existe, pero está vacío o mal formado (corrupto)
                 print(
@@ -752,9 +798,118 @@ class McControlApp:
         )
         pet_scan_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
+        # Frame para seleccionar macro dentro de PET Scan
+        macro_select_frame = tk.LabelFrame(
+            pet_scan_frame,
+            text="Seleccionar Macro",
+            font=("Arial", 10, "bold"),
+            bg="#f7f7f7"
+        )
+        macro_select_frame.pack(fill="x", padx=10, pady=(10, 5))
+
+        # Fila 1: Selector de macro
+        macro_inner_frame = tk.Frame(macro_select_frame, bg="#f7f7f7")
+        macro_inner_frame.pack(fill="x", padx=10, pady=(8, 5))
+
+        tk.Label(
+            macro_inner_frame,
+            text="Macro:",
+            font=("Arial", 9),
+            bg="#f7f7f7"
+        ).pack(side="left", padx=(0, 8))
+
+        # Variable para almacenar la macro seleccionada
+        self.selected_macro_var = tk.StringVar()
+        
+        # Función para actualizar las opciones del combobox
+        def update_macro_options():
+            macro_names = list(self.macros.keys()) if self.macros else []
+            macro_options = ["Sin Macro"] + macro_names
+            self.macro_combo_dashboard["values"] = macro_options
+            
+            # Si no hay selección o la selección ya no existe, poner "Sin Macro"
+            current = self.selected_macro_var.get()
+            if not current or (current != "Sin Macro" and current not in macro_names):
+                self.selected_macro_var.set("Sin Macro")
+        
+        # Función para guardar macro seleccionada
+        def on_macro_selected(event=None):
+            selected = self.selected_macro_var.get()
+            if selected and selected != "Sin Macro":
+                # Guardar en DB
+                if not hasattr(self, "db") or not isinstance(self.db, dict):
+                    self.db = {}
+                self.db["selected_macro"] = selected
+                self.update_db_stats()
+        
+        # Crear combobox
+        self.macro_combo_dashboard = ttk.Combobox(
+            macro_inner_frame,
+            textvariable=self.selected_macro_var,
+            state="readonly",
+            width=30
+        )
+        self.macro_combo_dashboard.pack(side="left", fill="x", expand=True)
+        self.macro_combo_dashboard.bind("<<ComboboxSelected>>", on_macro_selected)
+        
+        # Inicializar opciones
+        update_macro_options()
+        
+        # Cargar macro seleccionada previamente (si existe)
+        if hasattr(self, "db") and "selected_macro" in self.db:
+            saved_macro = self.db["selected_macro"]
+            # Verificar que la macro aún existe
+            if saved_macro in self.macros:
+                self.selected_macro_var.set(saved_macro)
+            else:
+                self.selected_macro_var.set("Sin Macro")
+        
+        # Botón para refrescar lista de macros
+        refresh_macros_btn = tk.Button(
+            macro_inner_frame,
+            text="🔄",
+            font=("Arial", 9, "bold"),
+            bg="#3498db",
+            fg="white",
+            width=3,
+            command=update_macro_options,
+            cursor="hand2"
+        )
+        refresh_macros_btn.pack(side="left", padx=(8, 0))
+
+        # Fila 2: Checkbox "Seleccionar todos" dentro del mismo LabelFrame
+        select_all_pets_frame = tk.Frame(macro_select_frame, bg="#f7f7f7")
+        select_all_pets_frame.pack(fill="x", padx=10, pady=(5, 8))
+
+        self.select_all_pets_var = tk.BooleanVar(value=False)
+        
+        def toggle_all_pets():
+            """Marca/desmarca todos los checkboxes de PETs (solo los que tienen MC)"""
+            value = self.select_all_pets_var.get()
+            for i in range(1, 11):
+                # Solo actualizar si tiene MC asignado
+                if self.pet_associations[i]["mc"] is not None:
+                    self.pet_associations[i]["enabled"] = value
+                    # Actualizar variable del checkbox
+                    if hasattr(self, 'pet_checkbox_vars') and i in self.pet_checkbox_vars:
+                        self.pet_checkbox_vars[i].set(value)
+            
+            # Guardar estado en DB después de actualizar todos
+            self.update_db_stats()
+        
+        select_all_pets_cb = tk.Checkbutton(
+            select_all_pets_frame,
+            text="Seleccionar todos",
+            variable=self.select_all_pets_var,
+            command=toggle_all_pets,
+            font=("Arial", 10, "bold"),
+            bg="#f7f7f7"
+        )
+        select_all_pets_cb.pack(anchor="w")
+        
         # Canvas para dibujar el círculo de PETs
         pet_canvas = tk.Canvas(pet_scan_frame, width=450, height=450, bg="white")
-        pet_canvas.pack(padx=20, pady=20)
+        pet_canvas.pack(padx=20, pady=(10, 20))
 
         # Dibujar 10 rectángulos en círculo        
         center_x = 225  
@@ -763,18 +918,68 @@ class McControlApp:
         num_pets = 10
 
         self.pet_buttons = []
+        self.pet_tooltips = []  # Lista para mantener referencias a tooltips
+        self.pet_checkbox_vars = {}  # Diccionario para mantener referencias a las variables
 
         for i in range(num_pets):
             angle = (2 * math.pi / num_pets) * i - (math.pi / 2) 
             x = center_x + radius * math.cos(angle)
             y = center_y + radius * math.sin(angle)
 
+            # Calcular posición del checkbox (arriba y más cerca del botón)
+            checkbox_offset = 30
+            cb_x = x
+            cb_y = y - checkbox_offset
+
+            # Crear variable BooleanVar vinculada al estado en pet_associations
+            pet_enabled_var = tk.BooleanVar(value=self.pet_associations[i+1]["enabled"])
+            self.pet_checkbox_vars[i+1] = pet_enabled_var  # Guardar referencia
+            
+            # Función para actualizar el estado cuando cambie el checkbox
+            def update_pet_enabled(pet_num, var):
+                # Solo permitir cambio si tiene MC asignado
+                if self.pet_associations[pet_num]["mc"] is None:
+                    var.set(False)  # Forzar a False
+                    return
+                
+                self.pet_associations[pet_num]["enabled"] = var.get()
+                
+                # Guardar en DB cuando cambia el estado del checkbox
+                self.update_db_stats()
+                
+                # Actualizar el checkbox "Seleccionar todos" si es necesario
+                all_selected = all(
+                    self.pet_associations[j]["enabled"] 
+                    for j in range(1, 11) 
+                    if self.pet_associations[j]["mc"] is not None
+                )
+                self.select_all_pets_var.set(all_selected)
+            
+            # Deshabilitar checkbox si no tiene MC
+            has_mc = self.pet_associations[i+1]["mc"] is not None
+            checkbox_state = "normal" if has_mc else "disabled"
+            
+            # Crear checkbox
+            pet_checkbox = tk.Checkbutton(
+                pet_canvas,
+                variable=pet_enabled_var,
+                bg="white",
+                activebackground="white",
+                state=checkbox_state,
+                command=lambda num=i+1, v=pet_enabled_var: update_pet_enabled(num, v)
+            )
+            pet_canvas.create_window(cb_x, cb_y, window=pet_checkbox)
+
+            # Determinar color según si tiene MC asignado
+            has_mc = self.pet_associations[i+1]["mc"] is not None
+            btn_bg = "#3498db" if has_mc else "#e67e22"  # Azul si tiene MC, naranja si no
+            
             # Crear botón con bordes redondeados
             pet_btn = tk.Button(
                 pet_canvas,
                 text=f"PET {i+1}",
                 font=("Arial", 9, "bold"),
-                bg="#3498db",
+                bg=btn_bg,
                 fg="white",
                 width=8,
                 height=2,
@@ -789,6 +994,27 @@ class McControlApp:
             # Colocar el botón en el canvas
             pet_canvas.create_window(x, y, window=pet_btn)
             self.pet_buttons.append(pet_btn)
+            
+            # Configurar tooltip para este botón
+            self.setup_pet_tooltip(pet_btn, i+1)
+
+        # Botón "Enviar" en el centro del círculo
+        self.send_pet_btn = tk.Button(
+            pet_canvas,
+            text="Enviar",
+            font=("Arial", 12, "bold"),
+            bg="#27ae60",
+            fg="white",
+            width=10,
+            height=2,
+            relief="raised",
+            borderwidth=3,
+            cursor="hand2",
+            command=self.toggle_send_pet_commands
+        )
+        
+        # Colocar el botón en el centro del círculo
+        pet_canvas.create_window(center_x, center_y, window=self.send_pet_btn)
 
         # Área de respuestas/log
         response_frame = tk.LabelFrame(
@@ -803,9 +1029,488 @@ class McControlApp:
         )
         self.response_text.pack(fill="both", expand=True)
         
+    def setup_pet_tooltip(self, button, pet_num):
+        """Configura el tooltip hover para un botón PET"""
+        tooltip = None
+        
+        def show_tooltip(event):
+            nonlocal tooltip
+            
+            # Obtener información de asociación
+            assoc = self.pet_associations[pet_num]
+            mc_label = "Sin MC"
+            
+            if assoc["mc"]:
+                # Buscar el label del MC
+                for mc_data in self.mc_registered.values():
+                    if mc_data.get("mac_destiny") == assoc["mc"]:
+                        mc_label = mc_data.get("label", "Sin etiqueta")
+                        break
+            
+            # Crear tooltip
+            x = button.winfo_rootx() + button.winfo_width() // 2
+            y = button.winfo_rooty() - 10
+            
+            tooltip = tk.Toplevel(button)
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{x}+{y}")
+            
+            # Frame contenedor con borde
+            frame = tk.Frame(
+                tooltip,
+                background="#2c3e50",
+                relief="solid",
+                borderwidth=1
+            )
+            frame.pack(fill="both", expand=True)
+            
+            # Contenido del tooltip
+            tk.Label(
+                frame,
+                text=f"PET {pet_num}",
+                font=("Arial", 9, "bold"),
+                bg="#2c3e50",
+                fg="white",
+                padx=10,
+                pady=2
+            ).pack()
+            
+            tk.Label(
+                frame,
+                text=f"MC: {mc_label}",
+                font=("Arial", 8),
+                bg="#2c3e50",
+                fg="#ecf0f1",
+                padx=10,
+                pady=2
+            ).pack()
+            
+            # Ajustar posición para que aparezca arriba del botón
+            tooltip.update_idletasks()
+            tooltip_height = tooltip.winfo_height()
+            tooltip.wm_geometry(f"+{x - tooltip.winfo_width()//2}+{y - tooltip_height - 5}")
+        
+        def hide_tooltip(event=None):
+            nonlocal tooltip
+            if tooltip:
+                tooltip.destroy()
+                tooltip = None
+        
+        # Handler para el clic que oculta el tooltip antes de abrir el modal
+        def on_click(event):
+            hide_tooltip()
+            # Dar un pequeño delay para que el tooltip se destruya antes del modal
+            button.after(10, lambda: button.invoke())
+            return "break"  # Prevenir propagación
+        
+        button.bind("<Enter>", show_tooltip)
+        button.bind("<Leave>", hide_tooltip)
+        button.bind("<Button-1>", on_click)
+
     def on_pet_click(self, pet_num):
-        """Maneja el clic en un botón PET (placeholder)"""
-        self.add_response(f"🔘 PET {pet_num} clickeado")
+        """Maneja el clic en un botón PET - abre modal de configuración"""
+        # Crear modal pero no hacer grab_set inmediatamente
+        modal = tk.Toplevel(self.root)
+        modal.title(f"Configurar PET {pet_num}")
+        modal.transient(self.root)
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+        
+        # Esperar a que el modal sea visible antes de hacer grab
+        modal.update_idletasks()
+        modal.after(50, lambda: modal.grab_set())
+        
+        self.center_modal_on_parent(modal, 500, 400)
+        
+        # Título
+        tk.Label(
+            modal,
+            text=f"Configurar PET {pet_num}",
+            font=("Arial", 14, "bold"),
+            bg="#f7f7f7"
+        ).pack(pady=(20, 10))
+        
+        # Obtener asociación actual
+        current_assoc = self.pet_associations[pet_num]
+        
+        # Frame principal de contenido
+        content_frame = tk.Frame(modal, bg="#f7f7f7")
+        content_frame.pack(fill="both", expand=True, padx=30, pady=10)
+        
+        # Sección Micro Controlador
+        mc_section = tk.LabelFrame(
+            content_frame,
+            text="Micro Controlador",
+            font=("Arial", 11, "bold"),
+            bg="#f7f7f7"
+        )
+        mc_section.pack(fill="x", pady=(0, 15))
+        
+        mc_frame = tk.Frame(mc_section, bg="#f7f7f7")
+        mc_frame.pack(fill="x", padx=15, pady=10)
+        
+        tk.Label(
+            mc_frame,
+            text="Seleccionar MC:",
+            font=("Arial", 10),
+            bg="#f7f7f7"
+        ).pack(anchor="w", pady=(0, 5))
+        
+        mc_var = tk.StringVar()
+        mc_options = ["Sin MC"] + self.get_mc_display_list()
+        
+        # Establecer valor inicial
+        if current_assoc["mc"]:
+            for option in mc_options:
+                if " | " in option and option.split(" | ")[1] == current_assoc["mc"]:
+                    mc_var.set(option)
+                    break
+        else:
+            mc_var.set("Sin MC")
+        
+        mc_combo = ttk.Combobox(
+            mc_frame,
+            textvariable=mc_var,
+            values=mc_options,
+            state="readonly",
+            width=40
+        )
+        mc_combo.pack(fill="x")
+        
+        # Frame de botones
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(fill="x", pady=(10, 20))
+        
+        def guardar():
+            selected_mc_display = mc_var.get()
+            
+            # Actualizar asociación
+            if selected_mc_display == "Sin MC":
+                self.pet_associations[pet_num]["mc"] = None
+                self.pet_associations[pet_num]["enabled"] = False  # Deshabilitar si no tiene MC
+            else:
+                selected_mc = self.get_mac_from_selection(selected_mc_display)
+                
+                # Verificar si otro PET ya tiene este MC asignado
+                for other_pet_num in range(1, 11):
+                    if other_pet_num != pet_num and self.pet_associations[other_pet_num]["mc"] == selected_mc:
+                        # Desasignar el MC del otro PET
+                        self.pet_associations[other_pet_num]["mc"] = None
+                        self.pet_associations[other_pet_num]["enabled"] = False
+                        
+                        # Actualizar color del botón del otro PET
+                        other_btn_index = other_pet_num - 1
+                        if other_btn_index < len(self.pet_buttons):
+                            self.pet_buttons[other_btn_index].config(bg="#e67e22")
+                        
+                        # Deshabilitar y desmarcar checkbox del otro PET
+                        if other_pet_num in self.pet_checkbox_vars:
+                            self.pet_checkbox_vars[other_pet_num].set(False)
+                            # Buscar el widget checkbox para deshabilitarlo
+                            for widget in self.root.winfo_children():
+                                self.find_and_disable_checkbox(widget, other_pet_num)
+                        
+                        self.add_response(f"⚠️ PET {other_pet_num} desasignado (MC reasignado a PET {pet_num})")
+                        break
+                
+                self.pet_associations[pet_num]["mc"] = selected_mc
+            
+            # Actualizar color del botón
+            btn_index = pet_num - 1
+            if btn_index < len(self.pet_buttons):
+                has_mc = self.pet_associations[pet_num]["mc"] is not None
+                new_bg = "#3498db" if has_mc else "#e67e22"
+                self.pet_buttons[btn_index].config(bg=new_bg)
+                
+                # Actualizar estado del checkbox
+                if pet_num in self.pet_checkbox_vars:
+                    if not has_mc:
+                        self.pet_checkbox_vars[pet_num].set(False)
+                    
+                    # Buscar el widget checkbox para habilitarlo/deshabilitarlo
+                    for widget in self.root.winfo_children():
+                        self.find_and_update_checkbox(widget, pet_num, has_mc)
+            
+            # Guardar en db
+            self.update_db_stats()
+            
+            self.add_response(f"✓ PET {pet_num} configurado correctamente")
+            modal.destroy()
+        
+        guardar_btn = tk.Button(
+            btn_frame,
+            text="Guardar",
+            font=("Arial", 10, "bold"),
+            bg="#27ae60",
+            fg="white",
+            command=guardar,
+            width=10
+        )
+        guardar_btn.pack(side="left", padx=(80, 10))
+        
+        cancelar_btn = tk.Button(
+            btn_frame,
+            text="Cancelar",
+            font=("Arial", 10, "bold"),
+            bg="#e74c3c",
+            fg="white",
+            command=modal.destroy,
+            width=10
+        )
+        cancelar_btn.pack(side="right", padx=(10, 80))
+
+    def find_and_update_checkbox(self, widget, pet_num, enabled):
+        """Busca recursivamente el checkbox de un PET y actualiza su estado"""
+        try:
+            # Si es un Canvas, buscar en sus hijos
+            if isinstance(widget, tk.Canvas):
+                for item in widget.find_all():
+                    item_widget = widget.nametowidget(widget.itemcget(item, 'window'))
+                    if isinstance(item_widget, tk.Checkbutton):
+                        # Verificar si es el checkbox del PET correcto
+                        # (comparando con la variable asociada)
+                        if hasattr(item_widget, 'cget'):
+                            try:
+                                var_name = str(item_widget.cget('variable'))
+                                if var_name and pet_num in self.pet_checkbox_vars:
+                                    checkbox_var_name = str(self.pet_checkbox_vars[pet_num])
+                                    if var_name == checkbox_var_name:
+                                        new_state = "normal" if enabled else "disabled"
+                                        item_widget.config(state=new_state)
+                                        return True
+                            except:
+                                pass
+            
+            # Buscar recursivamente en los hijos del widget
+            for child in widget.winfo_children():
+                if self.find_and_update_checkbox(child, pet_num, enabled):
+                    return True
+        except:
+            pass
+        return False
+    
+    def find_and_disable_checkbox(self, widget, pet_num):
+        """Busca recursivamente el checkbox de un PET y lo deshabilita"""
+        return self.find_and_update_checkbox(widget, pet_num, False)
+    
+    def toggle_send_pet_commands(self):
+        """Alterna entre enviar y cancelar comandos PET"""
+        if self.sending_pet_commands:
+            # Si está enviando, cancelar
+            self.cancel_pet_sending = True
+            self.add_response("⚠️ Cancelación de envío PET solicitada...")
+        else:
+            # Si no está enviando, iniciar envío
+            self.send_pet_macro_commands()
+
+    def send_pet_macro_commands(self):
+        """Envía la macro seleccionada a todos los PETs habilitados"""
+        # Validar que hay una macro seleccionada
+        selected_macro_name = self.selected_macro_var.get()
+        if not selected_macro_name or selected_macro_name == "Sin Macro":
+            messagebox.showwarning("Validación", "Debe seleccionar una macro para enviar")
+            return
+        
+        # Verificar que la macro existe
+        if selected_macro_name not in self.macros:
+            messagebox.showerror("Error", "La macro seleccionada no existe")
+            return
+        
+        macro_data = self.macros[selected_macro_name]
+        
+        # Recolectar PETs habilitados con MC asignado
+        pets_to_send = []
+        for pet_num in range(1, 11):
+            if self.pet_associations[pet_num]["enabled"] and self.pet_associations[pet_num]["mc"]:
+                # Buscar información del MC
+                mc_mac = self.pet_associations[pet_num]["mc"]
+                mc_info = None
+                for mac_src, data in self.mc_registered.items():
+                    if data.get("mac_destiny") == mc_mac:
+                        mc_info = {
+                            "pet_num": pet_num,
+                            "mac_origen": mac_src,
+                            "mac_destino": mc_mac,
+                            "interface": data.get("interface_destiny"),
+                            "label": data.get("label", "Sin etiqueta")
+                        }
+                        break
+                
+                if mc_info:
+                    pets_to_send.append(mc_info)
+        
+        if not pets_to_send:
+            messagebox.showwarning("Validación", "No hay PETs habilitados con MC asignado")
+            return
+        
+        # Extraer comandos de la macro
+        command_configs = macro_data.get("command_configs", {})
+        last_state = macro_data.get("last_state", {})
+        
+        if not command_configs:
+            messagebox.showwarning("Validación", "La macro seleccionada no tiene comandos configurados")
+            return
+        
+        # Construir lista de comandos a enviar
+        commands_to_send = []
+        auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
+        repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
+        
+        for cmd_name, cmd_config in command_configs.items():
+            base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+            cmd_last_state = last_state.get(cmd_name, "")
+            
+            # Saltar comandos sin estado definido
+            if not cmd_last_state:
+                continue
+            
+            # Obtener delta_time (default 1.0)
+            delta_time = last_state.get(f"{cmd_name}_delta", 1.0)
+            
+            # Para comandos automáticos
+            if base_cmd in auto_commands:
+                if cmd_last_state == "ON":
+                    appendix_key = cmd_config["ON"]
+                    
+                    # Obtener repeticiones si aplica
+                    repetitions = 1
+                    if base_cmd in repeatable_commands:
+                        repetitions = last_state.get(f"{cmd_name}_reps", 1)
+                    
+                    commands_to_send.append({
+                        "name": cmd_name,
+                        "state": "ON",
+                        "appendix_key": appendix_key,
+                        "repetitions": repetitions,
+                        "delta_time": delta_time
+                    })
+            else:
+                # Para comandos normales
+                if cmd_last_state in cmd_config:
+                    appendix_key = cmd_config[cmd_last_state]
+                    commands_to_send.append({
+                        "name": cmd_name,
+                        "state": cmd_last_state,
+                        "appendix_key": appendix_key,
+                        "repetitions": 1,
+                        "delta_time": delta_time
+                    })
+        
+        if not commands_to_send:
+            messagebox.showwarning("Validación", "La macro no tiene comandos habilitados")
+            return
+        
+        # Cambiar botón a modo "Cancelar"
+        self.sending_pet_commands = True
+        self.cancel_pet_sending = False
+        self.send_pet_btn.config(text="⏹ Cancelar", bg="#e74c3c")
+        
+        total_commands = sum(c["repetitions"] for c in commands_to_send)
+        self.add_response("=" * 50)
+        self.add_response(f"📡 Enviando macro '{selected_macro_name}' a {len(pets_to_send)} PET(s)")
+        self.add_response(f"   Total de comandos por PET: {total_commands}")
+        
+        # Función para enviar comandos a un PET específico
+        def send_to_pet(pet_info, commands):
+            """Envía todos los comandos a un PET específico"""
+            pet_num = pet_info["pet_num"]
+            mac_origen = pet_info["mac_origen"]
+            mac_destino = pet_info["mac_destino"]
+            interface = pet_info["interface"]
+            
+            try:
+                cmd_index = 1
+                total = sum(c["repetitions"] for c in commands)
+                
+                for cmd_info in commands:
+                    repetitions = cmd_info["repetitions"]
+                    delta_time = cmd_info["delta_time"]
+                    
+                    for rep in range(repetitions):
+                        # Verificar cancelación
+                        if self.cancel_pet_sending:
+                            self.add_response(f"⚠️ PET {pet_num}: Cancelado después de {cmd_index-1}/{total} comandos")
+                            return
+                        
+                        # Construir paquete
+                        try:
+                            appendix = appendix_dict.get(cmd_info["appendix_key"])
+                            mac_origen_bytes = bytes.fromhex(mac_origen.replace(":", ""))
+                            mac_destino_bytes = bytes.fromhex(mac_destino.replace(":", ""))
+                            payload_length = 7
+                            length_bytes = payload_length.to_bytes(2, byteorder="big")
+                            padding_bytes = b"\x00\x00\x00\x00"
+                            constant_bytes = b"\x02\x03"
+                            
+                            packet = (
+                                mac_destino_bytes
+                                + mac_origen_bytes
+                                + length_bytes
+                                + padding_bytes
+                                + constant_bytes
+                                + appendix
+                            )
+                            
+                            # Enviar
+                            scapy_packet = Raw(load=packet)
+                            sendp(scapy_packet, iface=interface, verbose=False)
+                            
+                            rep_info = f" (rep {rep+1}/{repetitions})" if repetitions > 1 else ""
+                            self.add_response(f"✓ PET {pet_num} [{cmd_index}/{total}]: {cmd_info['appendix_key']}{rep_info}")
+                            
+                        except Exception as e:
+                            self.add_response(f"✗ PET {pet_num} Error en {cmd_info['appendix_key']}: {str(e)}")
+                        
+                        cmd_index += 1
+                        
+                        # Esperar delta_time después de cada envío
+                        delay_cancelled = False
+                        for _ in range(int(delta_time * 10)):
+                            if self.cancel_pet_sending:
+                                self.add_response(f"⚠️ PET {pet_num}: Cancelado después de {cmd_index-1}/{total} comandos")
+                                delay_cancelled = True
+                                break
+                            time.sleep(0.1)
+                        
+                        if delay_cancelled:
+                            return
+                
+                if not self.cancel_pet_sending:
+                    self.add_response(f"✓ PET {pet_num}: Todos los comandos enviados")
+                    
+            except Exception as e:
+                self.add_response(f"✗ PET {pet_num}: Error general - {str(e)}")
+        
+        # Función para coordinar todos los envíos
+        def send_all_pets():
+            threads = []
+            
+            # Crear un thread por cada PET
+            for pet_info in pets_to_send:
+                thread = threading.Thread(
+                    target=send_to_pet,
+                    args=(pet_info, commands_to_send),
+                    daemon=True
+                )
+                threads.append(thread)
+                thread.start()
+            
+            # Esperar a que todos los threads terminen
+            for thread in threads:
+                thread.join()
+            
+            if not self.cancel_pet_sending:
+                self.add_response("✓ Envío completado a todos los PETs")
+            
+            self.add_response("=" * 50)
+            
+            # Restaurar botón
+            self.sending_pet_commands = False
+            self.cancel_pet_sending = False
+            self.send_pet_btn.config(text="Enviar", bg="#27ae60")
+        
+        # Ejecutar en thread principal
+        threading.Thread(target=send_all_pets, daemon=True).start()
 
     def create_commands_tab(self):
         """Crea la pestaña de comandos con scroll corregido"""
@@ -914,32 +1619,19 @@ class McControlApp:
         commands_main_container = tk.Frame(controls_frame)
         commands_main_container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Delta Tiempo Comandos
-        delta_time_frame = tk.Frame(commands_main_container)
-        delta_time_frame.pack(fill="x", pady=(0, 10))
-
-        tk.Label(
-            delta_time_frame,
-            text="Delta Tiempo Comandos (seg):",
+        # Botones de Macros y Gestionar Comandos (en el mismo frame)
+        macros_frame = tk.Frame(commands_main_container)
+        macros_frame.pack(fill="x", pady=(0, 10))
+        
+        # Botón "Gestionar Comandos" (primero, a la izquierda)
+        add_command_btn = tk.Button(
+            macros_frame,
+            text="Gestionar Comandos",
             font=("Arial", 9, "bold"),
-        ).pack(side="left")
-
-        self.delta_time_var = tk.DoubleVar(value=0.5)
-        delta_time_spinbox = tk.Spinbox(
-            delta_time_frame,
-            from_=0.1,
-            to=10.0,
-            increment=0.1,
-            textvariable=self.delta_time_var,
-            width=8,
-            justify="center",
-            format="%.1f",
+            bg="#f1c40f",
+            command=self.open_add_command_modal
         )
-        delta_time_spinbox.pack(side="left", padx=(5, 0))
-
-        # Botones de Macros
-        macros_frame = tk.Frame(delta_time_frame)
-        macros_frame.pack(side="right", padx=(10, 0))
+        add_command_btn.pack(side="left", padx=(0, 5))
         
         save_macro_btn = tk.Button(
             macros_frame,
@@ -960,16 +1652,6 @@ class McControlApp:
             command=self.load_macro
         )
         load_macro_btn.pack(side="left", padx=(0, 5))
-
-        # Botón "Gestionar Comandos"
-        add_command_btn = tk.Button(
-            delta_time_frame,
-            text="Gestionar Comandos",
-            font=("Arial", 9, "bold"),
-            bg="#f1c40f",
-            command=self.open_add_command_modal
-        )
-        add_command_btn.pack(side="right", padx=(10, 0))
 
         # Tabla de comandos
         table_frame = tk.Frame(commands_main_container)
@@ -1101,8 +1783,8 @@ class McControlApp:
             messagebox.showwarning("Validación", "No hay comandos configurados para guardar.")
             return
         
-        # Obtener macros existentes
-        existing_macros = mc_data.get("macros", {})
+        # Obtener macros universales
+        existing_macros = self.macros
 
         # Calcular altura del modal según cantidad de macros
         base_height = 250  # Altura base (título, input, botones)
@@ -1274,8 +1956,8 @@ class McControlApp:
                 messagebox.showwarning("Validación", "Debe ingresar un nombre para la macro.")
                 return
 
-            # Verificar si ya existe
-            if macro_name in existing_macros:
+            # Verificar si ya existe en macros universales
+            if macro_name in self.macros:
                 if not messagebox.askyesno("Confirmar sobrescritura", f"La macro '{macro_name}' ya existe.\n¿Desea sobrescribirla?"):
                     return
 
@@ -1289,19 +1971,25 @@ class McControlApp:
                 base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
                 if base_cmd in ["X_02_TestTrigger", "X_03_RO_Single"] and "repetitions" in cmd_state:
                     current_last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
+                
+                # Guardar delta_time individual
+                if "delta_time" in cmd_state:
+                    current_last_state[f"{cmd_name}_delta"] = cmd_state["delta_time"].get()
 
             # Construir datos de la macro
             macro_data = {
                 "command_configs": dict(command_configs),
-                "last_state": current_last_state,
-                "delta_time": self.delta_time_var.get()
+                "last_state": current_last_state
             }
 
-            # Guardar en el MC
+            # Guardar en macros universales
+            self.macros[macro_name] = macro_data
+            
+            # También guardar en el MC actual (mantener compatibilidad)
             if "macros" not in mc_data:
                 mc_data["macros"] = {}
-            
             mc_data["macros"][macro_name] = macro_data
+            
             self.update_db_stats()
             
             messagebox.showinfo("Éxito", f"Macro '{macro_name}' guardada correctamente.")
@@ -1348,9 +2036,9 @@ class McControlApp:
             messagebox.showwarning("Validación", "Micro Controlador no encontrado.")
             return
 
-        macros = mc_data.get("macros", {})
+        macros = self.macros
         if not macros:
-            messagebox.showinfo("Información", "No hay macros guardadas para este Micro Controlador.")
+            messagebox.showinfo("Información", "No hay macros guardadas.")
             return
 
         # Modal para seleccionar macro
@@ -1521,7 +2209,6 @@ class McControlApp:
             # Cargar configuración de la macro en la tabla
             mc_data["command_configs"] = dict(macro_data["command_configs"])
             mc_data["last_state"] = dict(macro_data.get("last_state", {}))
-            self.delta_time_var.set(macro_data.get("delta_time", 0.5))
             
             self.rebuild_command_table()
             modal.destroy()
@@ -1549,16 +2236,22 @@ class McControlApp:
         cancelar_btn.pack(side="right", padx=10)
 
     def delete_macro(self, mc_data, macro_name, callback=None):
-        """Elimina una macro del microcontrolador
+        """Elimina una macro universal
         
         Args:
-            mc_data: Datos del microcontrolador
+            mc_data: Datos del microcontrolador (no se usa, mantener para compatibilidad)
             macro_name: Nombre de la macro a eliminar
             callback: Función opcional a ejecutar después de eliminar
         """
         if messagebox.askyesno("Confirmar eliminación", f"¿Eliminar la macro '{macro_name}'?"):
-            if "macros" in mc_data and macro_name in mc_data["macros"]:
-                del mc_data["macros"][macro_name]
+            if macro_name in self.macros:
+                del self.macros[macro_name]
+                
+                # También eliminar de todos los MCs que la tengan
+                for mc_key, mc_info in self.mc_registered.items():
+                    if "macros" in mc_info and macro_name in mc_info["macros"]:
+                        del mc_info["macros"][macro_name]
+                
                 self.update_db_stats()
                 messagebox.showinfo("Éxito", f"Macro '{macro_name}' eliminada correctamente.")
                 
@@ -1818,11 +2511,9 @@ class McControlApp:
             )
             return
         
-        # Guardar delta_time y estados en el MC seleccionado
-        delta_time = self.delta_time_var.get()
+        # Guardar estados en el MC seleccionado
         for mc_key, mc_data in self.mc_registered.items():
             if mc_data.get("mac_destiny") == selected_mc:
-                mc_data["delta_time"] = delta_time
                 command_configs = mc_data.get("command_configs", {})
                 last_state = {}
                 
@@ -1847,6 +2538,10 @@ class McControlApp:
                     # Guardar repeticiones si aplica
                     if base_cmd in repeatable_commands and "repetitions" in cmd_state:
                         last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
+                    
+                    # Guardar delta_time individual
+                    if "delta_time" in cmd_state:
+                        last_state[f"{cmd_name}_delta"] = cmd_state["delta_time"].get()
                 
                 mc_data["last_state"] = last_state
                 break
@@ -1879,6 +2574,9 @@ class McControlApp:
             cmd_state = self.commands_state[cmd_name]
             base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
             
+            # Obtener delta_time individual (default 1.0)
+            delta_time = cmd_state.get("delta_time", tk.DoubleVar(value=1.0)).get()
+            
             # Para comandos automáticos, solo verificar si está enabled
             if base_cmd in auto_commands:
                 if cmd_state["enabled"].get():
@@ -1895,6 +2593,7 @@ class McControlApp:
                             "state": "ON",
                             "appendix_key": appendix_key,
                             "repetitions": repetitions,
+                            "delta_time": delta_time,
                         }
                     )
             else:
@@ -1907,15 +2606,13 @@ class McControlApp:
                             "state": cmd_state["state"],
                             "appendix_key": appendix_key,
                             "repetitions": 1,
+                            "delta_time": delta_time,
                         }
                     )
 
         if not commands_to_send:
             messagebox.showwarning("Validación", "Debe seleccionar al menos un comando")
             return
-
-        # Obtener delta de tiempo
-        delta_time = self.delta_time_var.get()
 
         # Confirmación solo si el checkbox está marcado
         if self.show_summary_var.get():
@@ -1926,7 +2623,6 @@ class McControlApp:
     Se enviarán {len(commands_to_send)} comando(s):
     {cmd_list}
 
-    Delta de tiempo: {delta_time}s
     MC Destino: {selected_mc}
     Interfaz: {interface}
             """.strip()
@@ -1949,6 +2645,7 @@ class McControlApp:
             
             for cmd_info in commands_to_send:
                 repetitions = cmd_info["repetitions"]
+                delta_time = cmd_info["delta_time"]
                 
                 for rep in range(repetitions):
                     # Verificar cancelación
@@ -1956,22 +2653,25 @@ class McControlApp:
                         self.add_response(f"⚠️ Envío cancelado después de {cmd_index-1}/{total_commands} comandos")
                         break
                     
-                    if cmd_index > 1:
-                        # Verificar cancelación durante el delay
-                        for _ in range(int(delta_time * 10)):
-                            if self.cancel_sending:
-                                self.add_response(f"⚠️ Envío cancelado después de {cmd_index-1}/{total_commands} comandos")
-                                break
-                            time.sleep(0.1)
-                        
-                        if self.cancel_sending:
-                            break
-                    
                     # Mostrar número de repetición si aplica
                     rep_info = f" (rep {rep+1}/{repetitions})" if repetitions > 1 else ""
                     send_command_packet(cmd_info, cmd_index, total_commands, rep_info)
                     cmd_index += 1
+                    
+                    # Esperar delta_time después de CADA envío (incluso entre repeticiones)
+                    # Verificar cancelación durante el delay
+                    delay_cancelled = False
+                    for _ in range(int(delta_time * 10)):
+                        if self.cancel_sending:
+                            self.add_response(f"⚠️ Envío cancelado después de {cmd_index-1}/{total_commands} comandos")
+                            delay_cancelled = True
+                            break
+                        time.sleep(0.1)
+                    
+                    if delay_cancelled:
+                        break
                 
+                # Si se canceló, salir del loop principal
                 if self.cancel_sending:
                     break
 
@@ -2211,6 +2911,12 @@ class McControlApp:
 
         # Actualiza los datos de microcontroladores registrados
         self.db["mc_registered"] = self.mc_registered
+        
+        # Actualiza las macros universales
+        self.db["macros"] = self.macros
+        
+        # Actualiza las asociaciones de PETs
+        self.db["pet_associations"] = self.pet_associations
 
         # Guarda en disco (sobrescribe)
         try:

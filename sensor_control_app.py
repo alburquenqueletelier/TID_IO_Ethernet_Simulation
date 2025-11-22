@@ -76,7 +76,7 @@ class McControlApp:
         # Estado de asociaciones PET
         self.pet_associations = {}  # {pet_num: {"mc": mac_destiny, "enable": boolean}}
         for i in range(1, 11):
-            self.pet_associations[i] = {"mc": None}
+            self.pet_associations[i] = {"mc": None, "enabled": None}
 
         self.init_database()
 
@@ -755,9 +755,35 @@ class McControlApp:
         )
         pet_scan_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
-        # Canvas para dibujar el círculo de PETs
+                # Canvas para dibujar el círculo de PETs
         pet_canvas = tk.Canvas(pet_scan_frame, width=450, height=450, bg="white")
         pet_canvas.pack(padx=20, pady=20)
+
+        # Checkbox "Seleccionar todos" arriba del canvas
+        select_all_pets_frame = tk.Frame(pet_scan_frame, bg="#f7f7f7")
+        select_all_pets_frame.pack(before=pet_canvas, pady=(10, 5))
+        
+        self.select_all_pets_var = tk.BooleanVar(value=False)
+        
+        def toggle_all_pets():
+            """Marca/desmarca todos los checkboxes de PETs"""
+            value = self.select_all_pets_var.get()
+            for i in range(1, 11):
+                self.pet_associations[i]["enabled"] = value
+            # Actualizar todas las variables de los checkboxes
+            if hasattr(self, 'pet_checkbox_vars'):
+                for var in self.pet_checkbox_vars.values():
+                    var.set(value)
+        
+        select_all_pets_cb = tk.Checkbutton(
+            select_all_pets_frame,
+            text="Seleccionar todos",
+            variable=self.select_all_pets_var,
+            command=toggle_all_pets,
+            font=("Arial", 10, "bold"),
+            bg="#f7f7f7"
+        )
+        select_all_pets_cb.pack()
 
         # Dibujar 10 rectángulos en círculo        
         center_x = 225  
@@ -767,11 +793,38 @@ class McControlApp:
 
         self.pet_buttons = []
         self.pet_tooltips = []  # Lista para mantener referencias a tooltips
+        self.pet_checkbox_vars = {}  # Diccionario para mantener referencias a las variables
 
         for i in range(num_pets):
             angle = (2 * math.pi / num_pets) * i - (math.pi / 2) 
             x = center_x + radius * math.cos(angle)
             y = center_y + radius * math.sin(angle)
+
+            # Calcular posición del checkbox (arriba y más cerca del botón)
+            checkbox_offset = 30
+            cb_x = x
+            cb_y = y - checkbox_offset
+
+                        # Crear variable BooleanVar vinculada al estado en pet_associations
+            pet_enabled_var = tk.BooleanVar(value=self.pet_associations[i+1]["enabled"])
+            self.pet_checkbox_vars[i+1] = pet_enabled_var  # Guardar referencia
+            
+            # Función para actualizar el estado cuando cambie el checkbox
+            def update_pet_enabled(pet_num, var):
+                self.pet_associations[pet_num]["enabled"] = var.get()
+                # Actualizar el checkbox "Seleccionar todos" si es necesario
+                all_selected = all(self.pet_associations[j]["enabled"] for j in range(1, 11))
+                self.select_all_pets_var.set(all_selected)
+            
+            # Crear checkbox
+            pet_checkbox = tk.Checkbutton(
+                pet_canvas,
+                variable=pet_enabled_var,
+                bg="white",
+                activebackground="white",
+                command=lambda num=i+1, v=pet_enabled_var: update_pet_enabled(num, v)
+            )
+            pet_canvas.create_window(cb_x, cb_y, window=pet_checkbox)
 
             # Crear botón con bordes redondeados
             pet_btn = tk.Button(
@@ -796,6 +849,24 @@ class McControlApp:
             
             # Configurar tooltip para este botón
             self.setup_pet_tooltip(pet_btn, i+1)
+
+        # Botón "Enviar" en el centro del círculo
+        send_pet_btn = tk.Button(
+            pet_canvas,
+            text="Enviar",
+            font=("Arial", 12, "bold"),
+            bg="#27ae60",
+            fg="white",
+            width=10,
+            height=2,
+            relief="raised",
+            borderwidth=3,
+            cursor="hand2",
+            command=lambda: self.add_response("🚀 Botón Enviar PET presionado (funcionalidad pendiente)")
+        )
+        
+        # Colocar el botón en el centro del círculo
+        pet_canvas.create_window(center_x, center_y, window=send_pet_btn)
 
         # Área de respuestas/log
         response_frame = tk.LabelFrame(
@@ -965,14 +1036,13 @@ class McControlApp:
         def guardar():
             selected_mc_display = mc_var.get()
             
-            # Actualizar asociación
+            # Actualizar asociación (mantener enabled)
             if selected_mc_display == "Sin MC":
                 self.pet_associations[pet_num]["mc"] = None
-                self.pet_associations[pet_num]["macro"] = None
             else:
                 selected_mc = self.get_mac_from_selection(selected_mc_display)
                 self.pet_associations[pet_num]["mc"] = selected_mc
-                
+
             # TODO: Guardar en db cuando esté definido el formato
             # self.save_pet_associations_to_db()
             

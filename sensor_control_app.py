@@ -78,6 +78,9 @@ class McControlApp:
         for i in range(1, 11):
             self.pet_associations[i] = {"mc": None, "enabled": None}
 
+        # Macros universales (compartidas entre todos los MCs)
+        self.macros = {}
+
         self.init_database()
 
         self.create_main_interface()
@@ -446,12 +449,14 @@ class McControlApp:
                 with open(nombre_archivo, "r", encoding="utf-8") as f:
                     # Intenta cargar el contenido en self.db
                     self.db = json.load(f)
-                    matched_macs = self.db.get("mc_registered")
+                    matched_macs = self.db.get("mc_registered", {})
                     for mac_origin in matched_macs.keys():
                         self.mc_registered[mac_origin] = matched_macs.get(mac_origin)
+                    
+                    # Cargar macros universales
+                    self.macros = self.db.get("macros", {})
 
                 print(f"Archivo '{nombre_archivo}' cargado exitosamente.")
-
             except json.JSONDecodeError:
                 # Caso: El archivo existe, pero está vacío o mal formado (corrupto)
                 print(
@@ -755,14 +760,69 @@ class McControlApp:
         )
         pet_scan_frame.pack(side="right", fill="both", expand=True, padx=(5, 0))
 
-                # Canvas para dibujar el círculo de PETs
-        pet_canvas = tk.Canvas(pet_scan_frame, width=450, height=450, bg="white")
-        pet_canvas.pack(padx=20, pady=20)
+        # Frame para seleccionar macro dentro de PET Scan
+        macro_select_frame = tk.LabelFrame(
+            pet_scan_frame,
+            text="Seleccionar Macro",
+            font=("Arial", 10, "bold"),
+            bg="#f7f7f7"
+        )
+        macro_select_frame.pack(fill="x", padx=10, pady=(10, 5))
 
-        # Checkbox "Seleccionar todos" arriba del canvas
-        select_all_pets_frame = tk.Frame(pet_scan_frame, bg="#f7f7f7")
-        select_all_pets_frame.pack(before=pet_canvas, pady=(10, 5))
+        # Fila 1: Selector de macro
+        macro_inner_frame = tk.Frame(macro_select_frame, bg="#f7f7f7")
+        macro_inner_frame.pack(fill="x", padx=10, pady=(8, 5))
+
+        tk.Label(
+            macro_inner_frame,
+            text="Macro:",
+            font=("Arial", 9),
+            bg="#f7f7f7"
+        ).pack(side="left", padx=(0, 8))
+
+        # Variable para almacenar la macro seleccionada
+        self.selected_macro_var = tk.StringVar()
         
+        # Función para actualizar las opciones del combobox
+        def update_macro_options():
+            macro_names = list(self.macros.keys()) if self.macros else []
+            macro_options = ["Sin Macro"] + macro_names
+            self.macro_combo_dashboard["values"] = macro_options
+            
+            # Si no hay selección o la selección ya no existe, poner "Sin Macro"
+            current = self.selected_macro_var.get()
+            if not current or (current != "Sin Macro" and current not in macro_names):
+                self.selected_macro_var.set("Sin Macro")
+        
+        # Crear combobox
+        self.macro_combo_dashboard = ttk.Combobox(
+            macro_inner_frame,
+            textvariable=self.selected_macro_var,
+            state="readonly",
+            width=30
+        )
+        self.macro_combo_dashboard.pack(side="left", fill="x", expand=True)
+        
+        # Inicializar opciones
+        update_macro_options()
+        
+        # Botón para refrescar lista de macros
+        refresh_macros_btn = tk.Button(
+            macro_inner_frame,
+            text="🔄",
+            font=("Arial", 9, "bold"),
+            bg="#3498db",
+            fg="white",
+            width=3,
+            command=update_macro_options,
+            cursor="hand2"
+        )
+        refresh_macros_btn.pack(side="left", padx=(8, 0))
+
+        # Fila 2: Checkbox "Seleccionar todos" dentro del mismo LabelFrame
+        select_all_pets_frame = tk.Frame(macro_select_frame, bg="#f7f7f7")
+        select_all_pets_frame.pack(fill="x", padx=10, pady=(5, 8))
+
         self.select_all_pets_var = tk.BooleanVar(value=False)
         
         def toggle_all_pets():
@@ -783,7 +843,11 @@ class McControlApp:
             font=("Arial", 10, "bold"),
             bg="#f7f7f7"
         )
-        select_all_pets_cb.pack()
+        select_all_pets_cb.pack(anchor="w")
+        
+        # Canvas para dibujar el círculo de PETs
+        pet_canvas = tk.Canvas(pet_scan_frame, width=450, height=450, bg="white")
+        pet_canvas.pack(padx=20, pady=(10, 20))
 
         # Dibujar 10 rectángulos en círculo        
         center_x = 225  
@@ -1366,8 +1430,8 @@ class McControlApp:
             messagebox.showwarning("Validación", "No hay comandos configurados para guardar.")
             return
         
-        # Obtener macros existentes
-        existing_macros = mc_data.get("macros", {})
+        # Obtener macros universales
+        existing_macros = self.macros
 
         # Calcular altura del modal según cantidad de macros
         base_height = 250  # Altura base (título, input, botones)
@@ -1539,8 +1603,8 @@ class McControlApp:
                 messagebox.showwarning("Validación", "Debe ingresar un nombre para la macro.")
                 return
 
-            # Verificar si ya existe
-            if macro_name in existing_macros:
+            # Verificar si ya existe en macros universales
+            if macro_name in self.macros:
                 if not messagebox.askyesno("Confirmar sobrescritura", f"La macro '{macro_name}' ya existe.\n¿Desea sobrescribirla?"):
                     return
 
@@ -1562,11 +1626,14 @@ class McControlApp:
                 "delta_time": self.delta_time_var.get()
             }
 
-            # Guardar en el MC
+            # Guardar en macros universales
+            self.macros[macro_name] = macro_data
+            
+            # También guardar en el MC actual (mantener compatibilidad)
             if "macros" not in mc_data:
                 mc_data["macros"] = {}
-            
             mc_data["macros"][macro_name] = macro_data
+            
             self.update_db_stats()
             
             messagebox.showinfo("Éxito", f"Macro '{macro_name}' guardada correctamente.")
@@ -1613,9 +1680,9 @@ class McControlApp:
             messagebox.showwarning("Validación", "Micro Controlador no encontrado.")
             return
 
-        macros = mc_data.get("macros", {})
+        macros = self.macros
         if not macros:
-            messagebox.showinfo("Información", "No hay macros guardadas para este Micro Controlador.")
+            messagebox.showinfo("Información", "No hay macros guardadas.")
             return
 
         # Modal para seleccionar macro
@@ -1814,16 +1881,22 @@ class McControlApp:
         cancelar_btn.pack(side="right", padx=10)
 
     def delete_macro(self, mc_data, macro_name, callback=None):
-        """Elimina una macro del microcontrolador
+        """Elimina una macro universal
         
         Args:
-            mc_data: Datos del microcontrolador
+            mc_data: Datos del microcontrolador (no se usa, mantener para compatibilidad)
             macro_name: Nombre de la macro a eliminar
             callback: Función opcional a ejecutar después de eliminar
         """
         if messagebox.askyesno("Confirmar eliminación", f"¿Eliminar la macro '{macro_name}'?"):
-            if "macros" in mc_data and macro_name in mc_data["macros"]:
-                del mc_data["macros"][macro_name]
+            if macro_name in self.macros:
+                del self.macros[macro_name]
+                
+                # También eliminar de todos los MCs que la tengan
+                for mc_key, mc_info in self.mc_registered.items():
+                    if "macros" in mc_info and macro_name in mc_info["macros"]:
+                        del mc_info["macros"][macro_name]
+                
                 self.update_db_stats()
                 messagebox.showinfo("Éxito", f"Macro '{macro_name}' eliminada correctamente.")
                 
@@ -2476,6 +2549,9 @@ class McControlApp:
 
         # Actualiza los datos de microcontroladores registrados
         self.db["mc_registered"] = self.mc_registered
+        
+        # Actualiza las macros universales
+        self.db["macros"] = self.macros
 
         # Guarda en disco (sobrescribe)
         try:

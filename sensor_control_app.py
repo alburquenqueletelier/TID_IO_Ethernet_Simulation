@@ -74,9 +74,9 @@ class McControlApp:
         self.frames_received = 0
 
         # Estado de asociaciones PET
-        self.pet_associations = {}  # {pet_num: {"mc": mac_destiny, "macro": macro_name}}
+        self.pet_associations = {}  # {pet_num: {"mc": mac_destiny, "enable": boolean}}
         for i in range(1, 11):
-            self.pet_associations[i] = {"mc": None, "macro": None}
+            self.pet_associations[i] = {"mc": None}
 
         self.init_database()
 
@@ -820,7 +820,6 @@ class McControlApp:
             # Obtener información de asociación
             assoc = self.pet_associations[pet_num]
             mc_label = "Sin MC"
-            macro_name = "Sin Macro"
             
             if assoc["mc"]:
                 # Buscar el label del MC
@@ -828,9 +827,6 @@ class McControlApp:
                     if mc_data.get("mac_destiny") == assoc["mc"]:
                         mc_label = mc_data.get("label", "Sin etiqueta")
                         break
-            
-            if assoc["macro"]:
-                macro_name = assoc["macro"]
             
             # Crear tooltip
             x = button.winfo_rootx() + button.winfo_width() // 2
@@ -867,16 +863,6 @@ class McControlApp:
                 bg="#2c3e50",
                 fg="#ecf0f1",
                 padx=10,
-                pady=1
-            ).pack()
-            
-            tk.Label(
-                frame,
-                text=f"Macro: {macro_name}",
-                font=("Arial", 8),
-                bg="#2c3e50",
-                fg="#ecf0f1",
-                padx=10,
                 pady=2
             ).pack()
             
@@ -885,23 +871,35 @@ class McControlApp:
             tooltip_height = tooltip.winfo_height()
             tooltip.wm_geometry(f"+{x - tooltip.winfo_width()//2}+{y - tooltip_height - 5}")
         
-        def hide_tooltip(event):
+        def hide_tooltip(event=None):
             nonlocal tooltip
             if tooltip:
                 tooltip.destroy()
                 tooltip = None
         
+        # Handler para el clic que oculta el tooltip antes de abrir el modal
+        def on_click(event):
+            hide_tooltip()
+            # Dar un pequeño delay para que el tooltip se destruya antes del modal
+            button.after(10, lambda: button.invoke())
+            return "break"  # Prevenir propagación
+        
         button.bind("<Enter>", show_tooltip)
         button.bind("<Leave>", hide_tooltip)
+        button.bind("<Button-1>", on_click)
 
     def on_pet_click(self, pet_num):
         """Maneja el clic en un botón PET - abre modal de configuración"""
+        # Crear modal pero no hacer grab_set inmediatamente
         modal = tk.Toplevel(self.root)
         modal.title(f"Configurar PET {pet_num}")
         modal.transient(self.root)
-        modal.grab_set()
         modal.resizable(False, False)
         modal.configure(bg="#f7f7f7")
+        
+        # Esperar a que el modal sea visible antes de hacer grab
+        modal.update_idletasks()
+        modal.after(50, lambda: modal.grab_set())
         
         self.center_modal_on_parent(modal, 500, 400)
         
@@ -960,77 +958,12 @@ class McControlApp:
         )
         mc_combo.pack(fill="x")
         
-        # Sección Macro
-        macro_section = tk.LabelFrame(
-            content_frame,
-            text="Macro",
-            font=("Arial", 11, "bold"),
-            bg="#f7f7f7"
-        )
-        macro_section.pack(fill="x", pady=(0, 15))
-        
-        macro_frame = tk.Frame(macro_section, bg="#f7f7f7")
-        macro_frame.pack(fill="x", padx=15, pady=10)
-        
-        tk.Label(
-            macro_frame,
-            text="Seleccionar Macro:",
-            font=("Arial", 10),
-            bg="#f7f7f7"
-        ).pack(anchor="w", pady=(0, 5))
-        
-        macro_var = tk.StringVar()
-        macro_combo = ttk.Combobox(
-            macro_frame,
-            textvariable=macro_var,
-            values=["Sin Macro"],
-            state="readonly",
-            width=40
-        )
-        macro_combo.pack(fill="x")
-        macro_var.set("Sin Macro")
-        
-        # Función para actualizar opciones de macro según MC seleccionado
-        def update_macro_options(*args):
-            selected_mc_display = mc_var.get()
-            
-            if selected_mc_display == "Sin MC" or not selected_mc_display:
-                macro_combo["values"] = ["Sin Macro"]
-                macro_var.set("Sin Macro")
-                return
-            
-            # Obtener MAC del MC seleccionado
-            selected_mc = self.get_mac_from_selection(selected_mc_display)
-            
-            # Buscar macros del MC
-            macros = []
-            for mc_data in self.mc_registered.values():
-                if mc_data.get("mac_destiny") == selected_mc:
-                    macros = list(mc_data.get("macros", {}).keys())
-                    break
-            
-            macro_options = ["Sin Macro"] + macros
-            macro_combo["values"] = macro_options
-            
-            # Mantener selección actual si es válida
-            if current_assoc["macro"] and current_assoc["macro"] in macros:
-                macro_var.set(current_assoc["macro"])
-            else:
-                macro_var.set("Sin Macro")
-        
-        # Vincular cambio de MC con actualización de macros
-        mc_var.trace_add("write", update_macro_options)
-        
-        # Actualizar macros con selección inicial
-        update_macro_options()
-        
         # Frame de botones
         btn_frame = tk.Frame(modal, bg="#f7f7f7")
         btn_frame.pack(fill="x", pady=(10, 20))
         
         def guardar():
             selected_mc_display = mc_var.get()
-            selected_macro = macro_var.get()
             
             # Actualizar asociación
             if selected_mc_display == "Sin MC":
@@ -1040,11 +973,6 @@ class McControlApp:
                 selected_mc = self.get_mac_from_selection(selected_mc_display)
                 self.pet_associations[pet_num]["mc"] = selected_mc
                 
-                if selected_macro == "Sin Macro":
-                    self.pet_associations[pet_num]["macro"] = None
-                else:
-                    self.pet_associations[pet_num]["macro"] = selected_macro
-            
             # TODO: Guardar en db cuando esté definido el formato
             # self.save_pet_associations_to_db()
             

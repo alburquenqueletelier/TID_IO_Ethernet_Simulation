@@ -106,7 +106,8 @@ class McControlApp:
             self.notebook,
             self.state_manager,
             self.packet_sender,
-            self.macro_manager
+            self.macro_manager,
+            parent_window=self.root
         )
         self.notebook.add(self.commands_tab, text="Commands")
 
@@ -154,19 +155,6 @@ class McControlApp:
 
     def on_closing(self):
         """Handle window close event."""
-        # Ask for confirmation
-        result = messagebox.askyesnocancel(
-            "Exit",
-            "Do you want to save changes before exiting?"
-        )
-
-        if result is None:  # Cancel
-            return
-        elif result:  # Yes - save and exit
-            try:
-                self.state_manager._save_to_db()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save: {e}")
 
         # Stop any ongoing packet sending
         if self.packet_sender.is_sending():

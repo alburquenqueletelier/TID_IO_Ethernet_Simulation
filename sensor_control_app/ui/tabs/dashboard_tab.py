@@ -725,7 +725,23 @@ class DashboardTab(ttk.Frame):
             mc for mc in all_mcs
             if mc.mac_source in self.state_manager.mc_available
         ]
-        mc_options = ["None"] + [f"{mc.label} ({mc.mac_destiny})" for mc in connected_mcs]
+
+        # Get all MCs already associated with other PETs
+        associated_macs = set()
+        for i in range(1, 11):
+            if i != pet_num:  # Exclude current PET
+                other_assoc = self.state_manager.get_pet_association(i)
+                if other_assoc and other_assoc.mc_mac:
+                    associated_macs.add(other_assoc.mc_mac)
+
+        # Build options with visual indicator for already associated MCs
+        mc_options = ["None"]
+        for mc in connected_mcs:
+            if mc.mac_destiny in associated_macs:
+                # Add blue indicator for already associated MCs
+                mc_options.append(f"🔗 {mc.label} ({mc.mac_destiny})")
+            else:
+                mc_options.append(f"{mc.label} ({mc.mac_destiny})")
 
         # Get current association
         assoc = self.state_manager.get_pet_association(pet_num)
@@ -733,7 +749,11 @@ class DashboardTab(ttk.Frame):
         if assoc and assoc.mc_mac:
             mc = self.state_manager.get_mc_by_destiny(assoc.mc_mac)
             if mc:
-                current_value = f"{mc.label} ({mc.mac_destiny})"
+                # Check if this MC is also associated with others
+                if mc.mac_destiny in associated_macs:
+                    current_value = f"🔗 {mc.label} ({mc.mac_destiny})"
+                else:
+                    current_value = f"{mc.label} ({mc.mac_destiny})"
 
         mc_var = tk.StringVar(value=current_value)
         mc_combo = ttk.Combobox(
@@ -756,9 +776,11 @@ class DashboardTab(ttk.Frame):
             if selection == "None":
                 mc_mac = None
             else:
-                # Extract MAC from "Label (MAC)" format
+                # Extract MAC from "Label (MAC)" or "🔗 Label (MAC)" format
                 try:
-                    mc_mac = selection.split("(")[1].rstrip(")")
+                    # Remove the emoji indicator if present
+                    clean_selection = selection.replace("🔗 ", "")
+                    mc_mac = clean_selection.split("(")[1].rstrip(")")
                 except (IndexError, AttributeError):
                     mc_mac = None
 
@@ -874,7 +896,7 @@ class DashboardTab(ttk.Frame):
 
         # Refresh table and comboboxes
         self.refresh_mc_table()
-        self.refresh_pet_mc_options()
+        self.refresh_pet_buttons()
 
         # Show success message
         messagebox.showinfo(

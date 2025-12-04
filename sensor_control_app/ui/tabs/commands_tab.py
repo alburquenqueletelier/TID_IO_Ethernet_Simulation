@@ -391,10 +391,14 @@ class CommandsTab(ttk.Frame):
         auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
         repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
 
-        # Determine if command has state
-        enabled_val = bool(last_state_value)
+        # Determine if command checkbox is enabled (check for saved enabled state)
+        mc = self.state_manager.get_mc(self.selected_mc_mac)
+        saved_enabled = False
+        if mc and hasattr(mc, 'last_state'):
+            saved_enabled = mc.last_state.get(f"{cmd_name}_enabled", False)
+
         self.commands_state[cmd_name] = {
-            "enabled": tk.BooleanVar(value=enabled_val),
+            "enabled": tk.BooleanVar(value=saved_enabled),
             "state": last_state_value if last_state_value else None,
         }
 
@@ -406,7 +410,7 @@ class CommandsTab(ttk.Frame):
 
         # Command name
         tk.Label(
-            row_frame, text=cmd_name, width=48, font=("Arial", 9), bg=bg_color
+            row_frame, text=cmd_name, width=50, font=("Arial", 9), bg=bg_color
         ).grid(row=0, column=1, sticky="w")
 
         col_offset = 2
@@ -676,6 +680,18 @@ class CommandsTab(ttk.Frame):
         if source_idx is None or target_idx is None:
             return
 
+        # Save current UI state temporarily (before rebuild)
+        temp_state = {}
+        for cmd_name, cmd_state in self.commands_state.items():
+            temp_state[cmd_name] = {
+                "enabled": cmd_state["enabled"].get(),
+                "state": cmd_state.get("state"),
+            }
+            if "repetitions" in cmd_state:
+                temp_state[cmd_name]["repetitions"] = cmd_state["repetitions"].get()
+            if "delta_time" in cmd_state:
+                temp_state[cmd_name]["delta_time"] = cmd_state["delta_time"].get()
+
         # Reorder in visual list
         item = self.command_rows.pop(source_idx)
         self.command_rows.insert(target_idx, item)
@@ -693,6 +709,54 @@ class CommandsTab(ttk.Frame):
         # Rebuild UI
         self.rebuild_command_table()
 
+        # Restore temporary state
+        for cmd_name, saved_state in temp_state.items():
+            if cmd_name in self.commands_state:
+                # Restore enabled
+                self.commands_state[cmd_name]["enabled"].set(saved_state["enabled"])
+
+                # Restore state
+                if saved_state["state"]:
+                    self.commands_state[cmd_name]["state"] = saved_state["state"]
+
+                    # Restore button visuals
+                    self.update_button_visuals(cmd_name, saved_state["state"])
+
+                # Restore repetitions
+                if "repetitions" in saved_state and "repetitions" in self.commands_state[cmd_name]:
+                    self.commands_state[cmd_name]["repetitions"].set(saved_state["repetitions"])
+
+                # Restore delta_time
+                if "delta_time" in saved_state and "delta_time" in self.commands_state[cmd_name]:
+                    self.commands_state[cmd_name]["delta_time"].set(saved_state["delta_time"])
+
+    def update_button_visuals(self, cmd_name: str, state: str):
+        """Update button visual state without triggering callbacks."""
+        if cmd_name not in self.commands_state:
+            return
+
+        cmd_state = self.commands_state[cmd_name]
+        on_btn = cmd_state.get("on_btn")
+        off_btn = cmd_state.get("off_btn")
+
+        if not on_btn:
+            return
+
+        # Reset both buttons
+        on_btn.config(bg="#e0e0e0", relief="raised")
+        if off_btn:
+            off_btn.config(bg="#e0e0e0", relief="raised")
+
+        # Highlight selected button
+        cmd_config = self.get_mc_command_config(cmd_name)
+        if cmd_config:
+            btn_keys = list(cmd_config.keys())
+            if state == btn_keys[0]:
+                on_btn.config(bg="#27ae60", relief="sunken")
+            elif len(btn_keys) > 1 and state == btn_keys[1]:
+                if off_btn:
+                    off_btn.config(bg="#e74c3c", relief="sunken")
+
     def toggle_command_state(self, cmd_name: str, state: str):
         """Toggle command state button."""
         if cmd_name not in self.commands_state:
@@ -703,21 +767,7 @@ class CommandsTab(ttk.Frame):
         cmd_state["enabled"].set(True)
 
         # Update button visuals
-        on_btn = cmd_state.get("on_btn")
-        off_btn = cmd_state.get("off_btn")
-
-        if on_btn:
-            on_btn.config(bg="#e0e0e0", relief="raised")
-        if off_btn:
-            off_btn.config(bg="#e0e0e0", relief="raised")
-
-        # Highlight selected button
-        if state == (list(self.get_mc_command_config(cmd_name).keys())[0] if self.get_mc_command_config(cmd_name) else "ON"):
-            if on_btn:
-                on_btn.config(bg="#27ae60", relief="sunken")
-        else:
-            if off_btn:
-                off_btn.config(bg="#e74c3c", relief="sunken")
+        self.update_button_visuals(cmd_name, state)
 
     def get_mc_command_config(self, cmd_name: str) -> Dict:
         """Get command config for selected MC."""
@@ -847,6 +897,10 @@ Interface: {mc.interface_destiny}"""
             state = cmd_state.get("state")
             if state:
                 mc.last_state[cmd_name] = state
+
+            # Save checkbox enabled state
+            if "enabled" in cmd_state:
+                mc.last_state[f"{cmd_name}_enabled"] = cmd_state["enabled"].get()
 
             # Save repetitions
             if "repetitions" in cmd_state:
@@ -998,44 +1052,119 @@ Interface: {mc.interface_destiny}"""
         btn_frame.pack(fill="x", pady=(20, 20))
 
         def accept():
-            # Build new command list with repetitions
-            new_command_list = []
+            # Save current UI state (including unsaved changes)
+            current_ui_state = {}
+            for cmd_name, cmd_state in self.commands_state.items():
+                current_ui_state[cmd_name] = {
+                    "enabled": cmd_state["enabled"].get(),
+                    "state": cmd_state.get("state"),
+                }
+                if "repetitions" in cmd_state:
+                    current_ui_state[cmd_name]["repetitions"] = cmd_state["repetitions"].get()
+                if "delta_time" in cmd_state:
+                    current_ui_state[cmd_name]["delta_time"] = cmd_state["delta_time"].get()
 
+            # Get current command_configs to preserve order
+            current_configs = mc.command_configs if hasattr(mc, 'command_configs') else {}
+            current_order = list(current_configs.keys())
+
+            # Determine desired instances for each command
+            desired_instances = {}
             for cmd in all_commands:
-                if command_vars[cmd].get():  # If selected
-                    instances = instance_vars[cmd].get()
-                    for _ in range(instances):
-                        new_command_list.append(cmd)
-
-            # Build command_configs maintaining order and allowing duplicates
-            new_command_configs = {}
-            for i, cmd in enumerate(new_command_list):
-                # Use unique key for each instance
-                if new_command_list.count(cmd) > 1:
-                    # Count how many times this command appeared before
-                    count_before = new_command_list[:i].count(cmd)
-                    key = f"{cmd}#{count_before + 1}"
+                if command_vars[cmd].get():
+                    desired_instances[cmd] = instance_vars[cmd].get()
                 else:
-                    key = cmd
-                new_command_configs[key] = COMMAND_CONFIGS[cmd]
+                    desired_instances[cmd] = 0
+
+            # Build new command list preserving order
+            new_command_configs = {}
+            used_commands = {cmd: 0 for cmd in all_commands}  # Track how many instances we've added
+
+            # First, keep existing commands in their current order
+            for key in current_order:
+                base_cmd = key.split('#')[0] if '#' in key else key
+
+                if base_cmd in desired_instances and used_commands[base_cmd] < desired_instances[base_cmd]:
+                    # Keep this instance
+                    used_commands[base_cmd] += 1
+
+                    # Generate new key
+                    if desired_instances[base_cmd] > 1:
+                        new_key = f"{base_cmd}#{used_commands[base_cmd]}"
+                    else:
+                        new_key = base_cmd
+
+                    new_command_configs[new_key] = COMMAND_CONFIGS[base_cmd]
+
+            # Add new instances at the end (for commands that need more instances)
+            for cmd in all_commands:
+                if cmd in desired_instances:
+                    while used_commands[cmd] < desired_instances[cmd]:
+                        used_commands[cmd] += 1
+
+                        if desired_instances[cmd] > 1:
+                            new_key = f"{cmd}#{used_commands[cmd]}"
+                        else:
+                            new_key = cmd
+
+                        new_command_configs[new_key] = COMMAND_CONFIGS[cmd]
 
             mc.command_configs = new_command_configs
 
-            # Update last_state
+            # Update last_state from both saved state and current UI state
             last_state = mc.last_state if hasattr(mc, 'last_state') else {}
             new_last_state = {}
-            for key in new_command_configs.keys():
-                # Extract base command (without #N)
-                base_cmd = key.split('#')[0] if '#' in key else key
-                # If state existed for this command, maintain it
-                if key in last_state:
-                    new_last_state[key] = last_state[key]
-                elif base_cmd in last_state:
-                    new_last_state[key] = last_state[base_cmd]
-                else:
-                    new_last_state[key] = ""
 
-            # Clean states of commands that no longer exist
+            # Map old keys to new keys
+            old_to_new_map = {}
+            old_keys = list(current_order)
+            new_keys = list(new_command_configs.keys())
+
+            # Create mapping for existing commands
+            cmd_counters = {}
+            for old_key in old_keys:
+                base_cmd = old_key.split('#')[0] if '#' in old_key else old_key
+                if base_cmd not in cmd_counters:
+                    cmd_counters[base_cmd] = 0
+                cmd_counters[base_cmd] += 1
+
+                # Find corresponding new key
+                new_key_index = None
+                temp_counter = 0
+                for i, new_key in enumerate(new_keys):
+                    new_base = new_key.split('#')[0] if '#' in new_key else new_key
+                    if new_base == base_cmd:
+                        temp_counter += 1
+                        if temp_counter == cmd_counters[base_cmd]:
+                            new_key_index = i
+                            break
+
+                if new_key_index is not None:
+                    old_to_new_map[old_key] = new_keys[new_key_index]
+
+            # Copy states using the mapping
+            for old_key, new_key in old_to_new_map.items():
+                # Copy from UI state first (has priority)
+                if old_key in current_ui_state:
+                    ui_state = current_ui_state[old_key]
+                    if ui_state["state"]:
+                        new_last_state[new_key] = ui_state["state"]
+                    new_last_state[f"{new_key}_enabled"] = ui_state["enabled"]
+                    if "repetitions" in ui_state:
+                        new_last_state[f"{new_key}_reps"] = ui_state["repetitions"]
+                    if "delta_time" in ui_state:
+                        new_last_state[f"{new_key}_delta"] = ui_state["delta_time"]
+                # Otherwise copy from saved state
+                else:
+                    if old_key in last_state:
+                        new_last_state[new_key] = last_state[old_key]
+                    if f"{old_key}_enabled" in last_state:
+                        new_last_state[f"{new_key}_enabled"] = last_state[f"{old_key}_enabled"]
+                    if f"{old_key}_reps" in last_state:
+                        new_last_state[f"{new_key}_reps"] = last_state[f"{old_key}_reps"]
+                    if f"{old_key}_delta" in last_state:
+                        new_last_state[f"{new_key}_delta"] = last_state[f"{old_key}_delta"]
+
             mc.last_state = new_last_state
 
             # Save to database
@@ -1075,19 +1204,474 @@ Interface: {mc.interface_destiny}"""
 
     def save_macro(self):
         """Save current command configuration as a macro."""
-        messagebox.showinfo(
-            "Save Macro",
-            "Macro save dialog not yet implemented in modular version.\n"
-            "This will be implemented in later phases."
+        if not self.selected_mc_mac:
+            messagebox.showwarning("Validation", "Must select a Microcontroller first.")
+            return
+
+        mc = self.state_manager.get_mc(self.selected_mc_mac)
+        if not mc:
+            messagebox.showwarning("Validation", "Microcontroller not found.")
+            return
+
+        # Verify there are configured commands
+        command_configs = mc.command_configs if hasattr(mc, 'command_configs') else {}
+        if not command_configs:
+            messagebox.showwarning("Validation", "No commands configured to save.")
+            return
+
+        # Get universal macros
+        existing_macros = self.state_manager.list_macros()
+
+        # Calculate modal height based on number of macros
+        base_height = 250  # Base height (title, input, buttons)
+        if existing_macros:
+            macros_section_height = min(250, len(existing_macros) * 35 + 60)  # Max 250px for list
+        else:
+            macros_section_height = 0
+
+        modal_height = base_height + macros_section_height
+
+        # Modal to request macro name
+        modal = tk.Toplevel(self.parent_window)
+        modal.title("Save Macro")
+        modal.transient(self.parent_window)
+        modal.grab_set()
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+
+        # Center modal
+        self.center_modal_on_parent(modal, 500, modal_height)
+
+        tk.Label(
+            modal,
+            text="Save Macro",
+            font=("Arial", 12, "bold"),
+            bg="#f7f7f7"
+        ).pack(pady=(20, 10))
+
+        # Frame for name input
+        name_frame = tk.Frame(modal, bg="#f7f7f7")
+        name_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        tk.Label(
+            name_frame,
+            text="Macro name:",
+            font=("Arial", 10),
+            bg="#f7f7f7"
+        ).pack(anchor="w")
+
+        name_var = tk.StringVar()
+        name_entry = tk.Entry(name_frame, textvariable=name_var, font=("Arial", 10))
+        name_entry.pack(fill="x", pady=(5, 0))
+        name_entry.focus()
+
+        # Existing macros section (if any)
+        if existing_macros:
+            tk.Label(
+                modal,
+                text="Saved macros (click to select):",
+                font=("Arial", 10, "bold"),
+                bg="#f7f7f7"
+            ).pack(anchor="w", padx=20, pady=(10, 5))
+
+            # Frame with scroll for macros - dynamic height based on quantity
+            max_height = min(250, len(existing_macros) * 35 + 10)  # Max 250px
+            macros_canvas_frame = tk.Frame(modal, bg="#f7f7f7", height=max_height)
+            macros_canvas_frame.pack(fill="x", padx=20, pady=(0, 10))
+            macros_canvas_frame.pack_propagate(False)
+
+            macros_canvas = tk.Canvas(
+                macros_canvas_frame,
+                bg="#f7f7f7",
+                highlightthickness=1,
+                highlightbackground="#ccc"
+            )
+            macros_scrollbar = tk.Scrollbar(macros_canvas_frame, orient="vertical", command=macros_canvas.yview)
+            macros_list_frame = tk.Frame(macros_canvas, bg="#f7f7f7")
+
+            macros_list_frame.bind("<Configure>", lambda e: macros_canvas.configure(scrollregion=macros_canvas.bbox("all")))
+            canvas_window = macros_canvas.create_window((0, 0), window=macros_list_frame, anchor="nw")
+
+            # Adjust width of inner frame to canvas
+            def on_canvas_configure(event):
+                macros_canvas.itemconfig(canvas_window, width=event.width)
+
+            macros_canvas.bind("<Configure>", on_canvas_configure)
+            macros_canvas.configure(yscrollcommand=macros_scrollbar.set)
+
+            macros_canvas.pack(side="left", fill="both", expand=True)
+            macros_scrollbar.pack(side="right", fill="y")
+
+            # Add each macro with delete button
+            for macro_name in existing_macros:
+                macro_row = tk.Frame(macros_list_frame, bg="white", relief="ridge", borderwidth=1)
+                macro_row.pack(fill="x", pady=2, padx=2)
+
+                # Frame for text (expands)
+                text_frame = tk.Frame(macro_row, bg="white")
+                text_frame.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+
+                # Label with macro name (truncated)
+                macro_label = tk.Label(
+                    text_frame,
+                    text=macro_name if len(macro_name) <= 30 else macro_name[:27] + "...",
+                    font=("Arial", 9),
+                    bg="white",
+                    anchor="w",
+                    cursor="hand2"
+                )
+                macro_label.pack(fill="x", expand=True)
+
+                # Tooltip to show full name on hover
+                def create_tooltip(widget, text):
+                    tooltip = None
+
+                    def on_enter(event):
+                        nonlocal tooltip
+                        if len(text) > 30:  # Only show if truncated
+                            x, y, _, _ = widget.bbox("insert")
+                            x += widget.winfo_rootx() + 25
+                            y += widget.winfo_rooty() + 25
+
+                            tooltip = tk.Toplevel(widget)
+                            tooltip.wm_overrideredirect(True)
+                            tooltip.wm_geometry(f"+{x}+{y}")
+
+                            label = tk.Label(
+                                tooltip,
+                                text=text,
+                                background="lightyellow",
+                                relief="solid",
+                                borderwidth=1,
+                                font=("Arial", 9)
+                            )
+                            label.pack()
+
+                    def on_leave(event):
+                        nonlocal tooltip
+                        if tooltip:
+                            tooltip.destroy()
+                            tooltip = None
+
+                    widget.bind("<Enter>", on_enter)
+                    widget.bind("<Leave>", on_leave)
+
+                create_tooltip(macro_label, macro_name)
+
+                # Click to select
+                def select_macro(name):
+                    name_var.set(name)
+
+                macro_label.bind("<Button-1>", lambda e, name=macro_name: select_macro(name))
+
+                # Delete button (aligned right)
+                def on_delete(m_name):
+                    if messagebox.askyesno("Confirm deletion", f"Delete macro '{m_name}'?"):
+                        self.state_manager.delete_macro(m_name)
+                        messagebox.showinfo("Success", f"Macro '{m_name}' deleted successfully.")
+                        modal.destroy()
+                        self.save_macro()
+
+                delete_btn = tk.Button(
+                    macro_row,
+                    text="🗑️",
+                    font=("Arial", 10),
+                    bg="#e74c3c",
+                    fg="white",
+                    width=3,
+                    command=lambda m_name=macro_name: on_delete(m_name)
+                )
+                delete_btn.pack(side="right", padx=5, pady=2)
+
+        # Frame for buttons
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(fill="x", pady=(10, 20), side="bottom")
+
+        def guardar():
+            macro_name = name_var.get().strip()
+            if not macro_name:
+                messagebox.showwarning("Validation", "Must enter a name for the macro.")
+                return
+
+            # Check if already exists in universal macros (get fresh list)
+            current_macros = self.state_manager.list_macros()
+            if macro_name in current_macros:
+                if not messagebox.askyesno("Confirm overwrite", f"Macro '{macro_name}' already exists.\nDo you want to overwrite it?"):
+                    return
+
+            # Build current last_state
+            current_last_state = {}
+            for cmd_name in command_configs.keys():
+                cmd_state = self.commands_state.get(cmd_name, {})
+                state = cmd_state.get("state")
+                if state:
+                    current_last_state[cmd_name] = state
+
+                # Save checkbox enabled state
+                if "enabled" in cmd_state:
+                    current_last_state[f"{cmd_name}_enabled"] = cmd_state["enabled"].get()
+
+                # Save repetitions if applicable
+                if "repetitions" in cmd_state:
+                    current_last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
+
+                # Save individual delta_time
+                if "delta_time" in cmd_state:
+                    current_last_state[f"{cmd_name}_delta"] = cmd_state["delta_time"].get()
+
+            # Build macro object
+            from ...core.models import Macro
+            macro = Macro(
+                name=macro_name,
+                command_configs=dict(command_configs),
+                last_state=current_last_state
+            )
+
+            # Save to universal macros using StateManager
+            self.state_manager.save_macro(macro)
+
+            messagebox.showinfo("Success", f"Macro '{macro_name}' saved successfully.")
+            modal.destroy()
+
+        guardar_btn = tk.Button(
+            btn_frame,
+            text="Save",
+            font=("Arial", 10, "bold"),
+            bg="#27ae60",
+            fg="white",
+            command=guardar,
+            width=10
         )
+        guardar_btn.pack(side="left", padx=(40, 10))
+
+        cancelar_btn = tk.Button(
+            btn_frame,
+            text="Cancel",
+            font=("Arial", 10, "bold"),
+            bg="#e74c3c",
+            fg="white",
+            command=modal.destroy,
+            width=10
+        )
+        cancelar_btn.pack(side="right", padx=(10, 40))
 
     def load_macro(self):
         """Load a saved macro."""
-        messagebox.showinfo(
-            "Load Macro",
-            "Macro load dialog not yet implemented in modular version.\n"
-            "This will be implemented in later phases."
+        if not self.selected_mc_mac:
+            messagebox.showwarning("Validation", "Must select a Microcontroller first.")
+            return
+
+        mc = self.state_manager.get_mc(self.selected_mc_mac)
+        if not mc:
+            messagebox.showwarning("Validation", "Microcontroller not found.")
+            return
+
+        macros = self.state_manager.list_macros()
+        if not macros:
+            messagebox.showinfo("Information", "No saved macros found.")
+            return
+
+        # Modal to select macro
+        modal = tk.Toplevel(self.parent_window)
+        modal.title("Load Macro")
+        modal.transient(self.parent_window)
+        modal.grab_set()
+        modal.resizable(False, False)
+        modal.configure(bg="#f7f7f7")
+
+        # Center modal
+        self.center_modal_on_parent(modal, 500, 400)
+
+        tk.Label(
+            modal,
+            text="Select a macro to load:",
+            font=("Arial", 11, "bold"),
+            bg="#f7f7f7"
+        ).pack(pady=(20, 10))
+
+        # Frame with scroll for macros
+        macros_canvas_frame = tk.Frame(modal, bg="#f7f7f7")
+        macros_canvas_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        macros_canvas = tk.Canvas(
+            macros_canvas_frame,
+            bg="#f7f7f7",
+            highlightthickness=1,
+            highlightbackground="#ccc"
         )
+        macros_scrollbar = tk.Scrollbar(macros_canvas_frame, orient="vertical", command=macros_canvas.yview)
+        macros_list_frame = tk.Frame(macros_canvas, bg="#f7f7f7")
+
+        macros_list_frame.bind("<Configure>", lambda e: macros_canvas.configure(scrollregion=macros_canvas.bbox("all")))
+        canvas_window = macros_canvas.create_window((0, 0), window=macros_list_frame, anchor="nw")
+
+        # Adjust width of inner frame to canvas
+        def on_canvas_configure(event):
+            macros_canvas.itemconfig(canvas_window, width=event.width)
+
+        macros_canvas.bind("<Configure>", on_canvas_configure)
+        macros_canvas.configure(yscrollcommand=macros_scrollbar.set)
+
+        macros_canvas.pack(side="left", fill="both", expand=True)
+        macros_scrollbar.pack(side="right", fill="y")
+
+        # Variable to store selected macro
+        selected_macro = tk.StringVar()
+
+        # List to maintain references of all rows
+        macro_rows_widgets = []
+
+        # Add each macro with delete button
+        for macro_name in macros:
+            macro_row = tk.Frame(macros_list_frame, bg="white", relief="ridge", borderwidth=1)
+            macro_row.pack(fill="x", pady=2, padx=2)
+
+            # Frame for text (expands)
+            text_frame = tk.Frame(macro_row, bg="white")
+            text_frame.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+
+            # Label with macro name (truncated)
+            macro_label = tk.Label(
+                text_frame,
+                text=macro_name if len(macro_name) <= 30 else macro_name[:27] + "...",
+                font=("Arial", 9),
+                bg="white",
+                anchor="w",
+                cursor="hand2"
+            )
+            macro_label.pack(fill="x", expand=True)
+
+            # Save widget references for this row
+            macro_rows_widgets.append({
+                "row": macro_row,
+                "frame": text_frame,
+                "label": macro_label
+            })
+
+            # Tooltip to show full name on hover
+            def create_tooltip(widget, text):
+                tooltip = None
+
+                def on_enter(event):
+                    nonlocal tooltip
+                    if len(text) > 30:
+                        x, y, _, _ = widget.bbox("insert")
+                        x += widget.winfo_rootx() + 25
+                        y += widget.winfo_rooty() + 25
+
+                        tooltip = tk.Toplevel(widget)
+                        tooltip.wm_overrideredirect(True)
+                        tooltip.wm_geometry(f"+{x}+{y}")
+
+                        label = tk.Label(
+                            tooltip,
+                            text=text,
+                            background="lightyellow",
+                            relief="solid",
+                            borderwidth=1,
+                            font=("Arial", 9)
+                        )
+                        label.pack()
+
+                def on_leave(event):
+                    nonlocal tooltip
+                    if tooltip:
+                        tooltip.destroy()
+                        tooltip = None
+
+                widget.bind("<Enter>", on_enter)
+                widget.bind("<Leave>", on_leave)
+
+            create_tooltip(macro_label, macro_name)
+
+            # Click to select
+            def select_macro_fn(name, current_row, current_frame, current_label):
+                selected_macro.set(name)
+
+                # Restore color of ALL rows
+                for widgets in macro_rows_widgets:
+                    widgets["row"].config(bg="white")
+                    widgets["frame"].config(bg="white")
+                    widgets["label"].config(bg="white")
+
+                # Apply selection color to current row
+                current_row.config(bg="#e3f2fd")
+                current_frame.config(bg="#e3f2fd")
+                current_label.config(bg="#e3f2fd")
+
+            # Bind with correct arguments using current loop values
+            macro_label.bind("<Button-1>", lambda e, n=macro_name, r=macro_row, f=text_frame, l=macro_label: select_macro_fn(n, r, f, l))
+            text_frame.bind("<Button-1>", lambda e, n=macro_name, r=macro_row, f=text_frame, l=macro_label: select_macro_fn(n, r, f, l))
+            macro_row.bind("<Button-1>", lambda e, n=macro_name, r=macro_row, f=text_frame, l=macro_label: select_macro_fn(n, r, f, l))
+
+            # Delete button
+            def on_delete(name):
+                if messagebox.askyesno("Confirm deletion", f"Delete macro '{name}'?"):
+                    self.state_manager.delete_macro(name)
+                    messagebox.showinfo("Success", f"Macro '{name}' deleted successfully.")
+                    modal.destroy()
+                    self.load_macro()
+
+            delete_btn = tk.Button(
+                macro_row,
+                text="🗑️",
+                font=("Arial", 10),
+                bg="#e74c3c",
+                fg="white",
+                width=3,
+                command=lambda name=macro_name: on_delete(name)
+            )
+            delete_btn.pack(side="right", padx=5, pady=2)
+
+        btn_frame = tk.Frame(modal, bg="#f7f7f7")
+        btn_frame.pack(pady=(10, 20))
+
+        def cargar():
+            macro_name = selected_macro.get()
+            if not macro_name:
+                messagebox.showwarning("Validation", "Must select a macro.")
+                return
+
+            # Load macro object
+            macro = self.state_manager.load_macro(macro_name)
+            if not macro:
+                messagebox.showerror("Error", "Selected macro no longer exists.")
+                return
+
+            # Load macro configuration into MC
+            mc.command_configs = dict(macro.command_configs)
+            mc.last_state = dict(macro.last_state)
+
+            # Save to database
+            self.state_manager._save_to_db()
+
+            # Rebuild command table
+            self.rebuild_command_table()
+            modal.destroy()
+
+            messagebox.showinfo("Success", f"Macro '{macro_name}' loaded successfully.")
+
+        cargar_btn = tk.Button(
+            btn_frame,
+            text="Load",
+            font=("Arial", 10, "bold"),
+            bg="#3498db",
+            fg="white",
+            command=cargar,
+            width=10
+        )
+        cargar_btn.pack(side="left", padx=10)
+
+        cancelar_btn = tk.Button(
+            btn_frame,
+            text="Cancel",
+            font=("Arial", 10, "bold"),
+            bg="#e74c3c",
+            fg="white",
+            command=modal.destroy,
+            width=10
+        )
+        cancelar_btn.pack(side="right", padx=10)
 
     def get_command_configs(self) -> Dict:
         """

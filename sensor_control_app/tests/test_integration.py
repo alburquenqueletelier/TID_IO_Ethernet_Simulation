@@ -110,9 +110,9 @@ class TestApplicationIntegration(unittest.TestCase):
         # Verify commands tab can see the MC
         app.commands_tab.refresh_mc_list()
 
-        # Check that MC appears in commands tab
-        mc_var = app.commands_tab.mc_var
-        self.assertIsNotNone(mc_var)
+        # Check that MC appears in commands tab combobox
+        self.assertIsNotNone(app.commands_tab.mc_combo)
+        self.assertGreater(len(app.commands_tab.mc_combo['values']), 0)
 
     @patch('sensor_control_app.network.InterfaceDiscovery.get_ethernet_interfaces')
     def test_network_interface_discovery(self, mock_get_interfaces):
@@ -136,19 +136,23 @@ class TestApplicationIntegration(unittest.TestCase):
         """Test macro save and load across tabs."""
         app = McControlApp(self.root, db_path=self.temp_db_path)
 
-        # Save a universal macro
-        macro_data = {
-            "command_configs": {
+        # Save a universal macro using the Macro model
+        from sensor_control_app.core.models import Macro
+
+        macro = Macro(
+            name="TestMacro",
+            command_configs={
                 "X_00_CPU": {"enabled": True, "selected_option": 1}
             },
-            "last_state": {}
-        }
+            last_state={}
+        )
 
-        app.macro_manager.save_universal_macro("TestMacro", macro_data)
+        app.macro_manager.save_universal_macro(macro)
 
         # Verify macro can be loaded
         loaded = app.macro_manager.load_universal_macro("TestMacro")
-        self.assertEqual(loaded["command_configs"]["X_00_CPU"]["enabled"], True)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.command_configs["X_00_CPU"]["enabled"], True)
 
         # Verify macro persists after save
         with patch('tkinter.messagebox.showinfo'):
@@ -163,7 +167,8 @@ class TestApplicationIntegration(unittest.TestCase):
         app2 = McControlApp(self.root, db_path=self.temp_db_path)
 
         loaded2 = app2.macro_manager.load_universal_macro("TestMacro")
-        self.assertEqual(loaded2["command_configs"]["X_00_CPU"]["enabled"], True)
+        self.assertIsNotNone(loaded2)
+        self.assertEqual(loaded2.command_configs["X_00_CPU"]["enabled"], True)
 
     def test_pet_association_integration(self):
         """Test PET scanner association with microcontrollers."""
@@ -179,11 +184,12 @@ class TestApplicationIntegration(unittest.TestCase):
         app.state_manager.register_mc(mc)
 
         # Associate with PET 1
-        app.state_manager.associate_pet_with_mc(1, "AA:BB:CC:DD:EE:FF")
+        # The refactored code uses associate_pet(pet_num, mc_mac, enabled)
+        app.state_manager.associate_pet(1, mc.mac_source, enabled=False)
 
         # Verify association
         pet_data = app.state_manager.get_pet_association(1)
-        self.assertEqual(pet_data.mc_mac, "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(pet_data.mc_mac, mc.mac_source)
 
         # Refresh dashboard
         app.dashboard_tab.load_data()
@@ -312,13 +318,13 @@ class TestApplicationIntegration(unittest.TestCase):
 
         # Associate all 10 PETs with the same MC
         for pet_num in range(1, 11):
-            app.state_manager.associate_pet_with_mc(pet_num, "AA:BB:CC:DD:EE:FF")
-            app.state_manager.set_pet_enabled(pet_num, True)
+            # Use associate_pet instead of associate_pet_with_mc
+            app.state_manager.associate_pet(pet_num, mc.mac_source, enabled=True)
 
         # Verify all associations
         for pet_num in range(1, 11):
             pet_data = app.state_manager.get_pet_association(pet_num)
-            self.assertEqual(pet_data.mc_mac, "AA:BB:CC:DD:EE:FF")
+            self.assertEqual(pet_data.mc_mac, mc.mac_source)
             self.assertTrue(pet_data.enabled)
 
         # Save and reload
@@ -335,7 +341,7 @@ class TestApplicationIntegration(unittest.TestCase):
         # Verify persistence
         for pet_num in range(1, 11):
             pet_data = app2.state_manager.get_pet_association(pet_num)
-            self.assertEqual(pet_data.mc_mac, "AA:BB:CC:DD:EE:FF")
+            self.assertEqual(pet_data.mc_mac, "00:11:22:33:44:55")
 
 
 class TestEndToEndWorkflows(unittest.TestCase):
@@ -384,8 +390,8 @@ class TestEndToEndWorkflows(unittest.TestCase):
         app.state_manager.register_mc(mc)
 
         # 3. Associate with PET
-        app.state_manager.associate_pet_with_mc(1, "AA:BB:CC:DD:EE:FF")
-        app.state_manager.set_pet_enabled(1, True)
+        # Use associate_pet instead of associate_pet_with_mc
+        app.state_manager.associate_pet(1, mc.mac_source, enabled=True)
 
         # 4. Configure commands (simulate)
         command_configs = {
@@ -395,14 +401,19 @@ class TestEndToEndWorkflows(unittest.TestCase):
                 "repetitions": 1
             }
         }
-        app.state_manager.save_mc_commands("AA:BB:CC:DD:EE:FF", command_configs)
+        # Update the MC's command configs directly
+        mc.command_configs = command_configs
+        app.state_manager.register_mc(mc)  # This will trigger save to DB
 
-        # 5. Save macro
-        macro_data = {
-            "command_configs": command_configs,
-            "last_state": {}
-        }
-        app.macro_manager.save_universal_macro("WorkflowMacro", macro_data)
+        # 5. Save macro using Macro model
+        from sensor_control_app.core.models import Macro
+
+        workflow_macro = Macro(
+            name="WorkflowMacro",
+            command_configs=command_configs,
+            last_state={}
+        )
+        app.macro_manager.save_universal_macro(workflow_macro)
 
         # 6. Refresh UI
         app.dashboard_tab.load_data()
@@ -428,7 +439,7 @@ class TestEndToEndWorkflows(unittest.TestCase):
         self.assertEqual(mcs[0].label, "WorkflowMC")
 
         pet_data = app2.state_manager.get_pet_association(1)
-        self.assertEqual(pet_data.mc_mac, "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(pet_data.mc_mac, "00:11:22:33:44:55")
 
         macro = app2.macro_manager.load_universal_macro("WorkflowMacro")
         self.assertIsNotNone(macro)

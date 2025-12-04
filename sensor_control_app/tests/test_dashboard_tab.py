@@ -76,15 +76,15 @@ class TestDashboardTab(unittest.TestCase):
             self.macro_manager
         )
 
-        # Should have 10 PET checkboxes
-        self.assertEqual(len(tab.pet_checkboxes), 10)
+        # Should have 10 PET checkboxes (renamed to pet_checkboxes_widgets)
+        self.assertEqual(len(tab.pet_checkboxes_widgets), 10)
 
         # Check PET numbers 1-10
         for pet_num in range(1, 11):
-            self.assertIn(pet_num, tab.pet_checkboxes)
+            self.assertIn(pet_num, tab.pet_checkboxes_widgets)
 
     def test_has_pet_comboboxes(self):
-        """Test that PET comboboxes are created."""
+        """Test that PET checkbox variables are created."""
         tab = DashboardTab(
             self.root,
             self.state_manager,
@@ -93,12 +93,13 @@ class TestDashboardTab(unittest.TestCase):
             self.macro_manager
         )
 
-        # Should have 10 PET comboboxes
-        self.assertEqual(len(tab.pet_comboboxes), 10)
+        # Should have 10 PET checkbox variables
+        # The refactored code uses pet_checkbox_vars instead of pet_comboboxes
+        self.assertEqual(len(tab.pet_checkbox_vars), 10)
 
         # Check PET numbers 1-10
         for pet_num in range(1, 11):
-            self.assertIn(pet_num, tab.pet_comboboxes)
+            self.assertIn(pet_num, tab.pet_checkbox_vars)
 
     def test_refresh_interfaces(self):
         """Test refreshing network interfaces."""

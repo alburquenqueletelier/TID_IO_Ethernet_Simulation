@@ -66,7 +66,7 @@ class TestCommandsTab(unittest.TestCase):
         self.assertIsInstance(tab.mc_combo, ttk.Combobox)
 
     def test_has_command_widgets(self):
-        """Test that command widgets are created."""
+        """Test that command state tracking exists."""
         tab = CommandsTab(
             self.root,
             self.state_manager,
@@ -74,13 +74,13 @@ class TestCommandsTab(unittest.TestCase):
             self.macro_manager
         )
 
-        # Should have command widgets
-        self.assertIsInstance(tab.command_widgets, dict)
-        # Should have some commands (from COMMAND_CONFIGS)
-        self.assertGreater(len(tab.command_widgets), 0)
+        # Should have commands_state dict (renamed from command_widgets)
+        self.assertIsInstance(tab.commands_state, dict)
+        # Initially empty until MC is selected
+        self.assertIsInstance(tab.commands_state, dict)
 
     def test_has_scrollable_frame(self):
-        """Test that commands tab has scrollable frame."""
+        """Test that commands tab has scrollable canvas."""
         tab = CommandsTab(
             self.root,
             self.state_manager,
@@ -88,7 +88,8 @@ class TestCommandsTab(unittest.TestCase):
             self.macro_manager
         )
 
-        self.assertTrue(hasattr(tab, 'scrollable'))
+        # The refactored code uses commands_canvas instead of scrollable
+        self.assertTrue(hasattr(tab, 'commands_canvas'))
 
     def test_refresh_mc_list(self):
         """Test refreshing MC list."""
@@ -178,10 +179,10 @@ class TestCommandsTab(unittest.TestCase):
             self.macro_manager
         )
 
-        # Enable a command
-        if tab.command_widgets:
-            first_config = list(tab.command_widgets.keys())[0]
-            tab.command_widgets[first_config]["enabled_var"].set(True)
+        # Enable a command if any exist in commands_state
+        if tab.commands_state:
+            first_config = list(tab.commands_state.keys())[0]
+            tab.commands_state[first_config]["enabled"].set(True)
 
             # Get configs
             configs = tab.get_command_configs()

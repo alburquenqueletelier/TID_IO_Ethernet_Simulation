@@ -301,20 +301,26 @@ class StateManager:
         if not self.database:
             return
 
-        # Convertir estado a formato de diccionario para DB
-        data = {
-            "mc_registered": {
-                mac: mc.to_dict() for mac, mc in self.mc_registered.items()
-            },
-            "pet_associations": {
-                str(num): assoc.to_dict() for num, assoc in self.pet_associations.items()
-            },
-            "macros": {
-                name: macro.to_dict() for name, macro in self.macros.items()
-            }
-        }
+        # Update individual keys to preserve other data (like macros saved via MacroManager)
+        self.database.set("mc_registered", {
+            mac: mc.to_dict() for mac, mc in self.mc_registered.items()
+        }, auto_save=False)
 
-        self.database.save(data)
+        self.database.set("pet_associations", {
+            str(num): assoc.to_dict() for num, assoc in self.pet_associations.items()
+        }, auto_save=False)
+
+        # Merge with existing macros in database to preserve macros saved via MacroManager
+        existing_macros = self.database.get("macros", {})
+        merged_macros = existing_macros.copy()
+        merged_macros.update({
+            name: macro.to_dict() for name, macro in self.macros.items()
+        })
+
+        self.database.set("macros", merged_macros, auto_save=False)
+
+        # Save once at the end
+        self.database.save()
 
     def load_from_db(self) -> None:
         """

@@ -62,6 +62,10 @@ class DashboardTab(ttk.Frame):
         self.mc_table_rows = []
         self.selected_pet_macros = {}  # {pet_num: [macro_names]}
 
+        # PET command sending state
+        self.sending_pet_commands = False
+        self.cancel_pet_sending = False
+
         # Setup UI
         self.setup_ui()
 
@@ -452,7 +456,7 @@ class DashboardTab(ttk.Frame):
             relief="raised",
             borderwidth=3,
             cursor="hand2",
-            command=self.send_pet_commands
+            command=self.toggle_send_pet_commands
         )
 
         # Place send button in center
@@ -835,11 +839,221 @@ class DashboardTab(ttk.Frame):
 
     def send_pet_commands(self):
         """Send commands to all enabled PETs."""
-        messagebox.showinfo(
-            "Send Commands",
-            "PET command sending not yet implemented.\n"
-            "This will send the selected macro to all enabled PETs."
-        )
+        import threading
+        import time
+        from ...core.protocol import COMMANDS
+
+        # Validar que hay una macro seleccionada
+        selected_macro_name = self.selected_macro_var.get()
+        if not selected_macro_name or selected_macro_name == "No Macro":
+            messagebox.showwarning("Validation", "You must select a macro to send")
+            return
+
+        # Verificar que la macro existe
+        macro = self.macro_manager.load_universal_macro(selected_macro_name)
+        if not macro:
+            messagebox.showerror("Error", "The selected macro does not exist")
+            return
+
+        # Recolectar PETs habilitados con MC asignado
+        pets_to_send = []
+        for pet_num in range(1, 11):
+            assoc = self.state_manager.get_pet_association(pet_num)
+            if assoc and assoc.enabled and assoc.mc_mac:
+                # Buscar información del MC
+                mc = self.state_manager.get_mc_by_destiny(assoc.mc_mac)
+                if mc and mc.mac_source in self.state_manager.mc_available:
+                    pets_to_send.append({
+                        "pet_num": pet_num,
+                        "mac_source": mc.mac_source,
+                        "mac_destiny": mc.mac_destiny,
+                        "interface": mc.interface_destiny,
+                        "label": mc.label
+                    })
+
+        if not pets_to_send:
+            messagebox.showwarning("Validation", "No enabled PETs with assigned MC")
+            return
+
+        # Extraer comandos de la macro
+        command_configs = macro.command_configs
+        last_state = macro.last_state
+
+        if not command_configs:
+            messagebox.showwarning("Validation", "The selected macro has no configured commands")
+            return
+
+        # Construir lista de comandos a enviar
+        commands_to_send = []
+        auto_commands = ["X_FF_Reset", "X_02_TestTrigger", "X_03_RO_Single"]
+        repeatable_commands = ["X_02_TestTrigger", "X_03_RO_Single"]
+
+        for cmd_name, cmd_config in command_configs.items():
+            base_cmd = cmd_name.split('#')[0] if '#' in cmd_name else cmd_name
+            cmd_last_state = last_state.get(cmd_name, "")
+
+            # Saltar comandos sin estado definido
+            if not cmd_last_state:
+                continue
+
+            # Obtener delta_time (default 1.0)
+            delta_time = last_state.get(f"{cmd_name}_delta", 1.0)
+
+            # Para comandos automáticos
+            if base_cmd in auto_commands:
+                if cmd_last_state == "ON":
+                    appendix_key = cmd_config["ON"]
+
+                    # Obtener repeticiones si aplica
+                    repetitions = 1
+                    if base_cmd in repeatable_commands:
+                        repetitions = last_state.get(f"{cmd_name}_reps", 1)
+
+                    commands_to_send.append({
+                        "name": cmd_name,
+                        "state": "ON",
+                        "appendix_key": appendix_key,
+                        "repetitions": repetitions,
+                        "delta_time": delta_time
+                    })
+            else:
+                # Para comandos normales
+                if cmd_last_state in cmd_config:
+                    appendix_key = cmd_config[cmd_last_state]
+                    commands_to_send.append({
+                        "name": cmd_name,
+                        "state": cmd_last_state,
+                        "appendix_key": appendix_key,
+                        "repetitions": 1,
+                        "delta_time": delta_time
+                    })
+
+        if not commands_to_send:
+            messagebox.showwarning("Validation", "The macro has no enabled commands")
+            return
+
+        # Cambiar botón a modo "Cancelar"
+        self.sending_pet_commands = True
+        self.cancel_pet_sending = False
+        self.send_pet_btn.config(text="⏹ Cancel", bg="#e74c3c")
+
+        total_commands = sum(c["repetitions"] for c in commands_to_send)
+        print("=" * 50)
+        print(f"📡 Sending macro '{selected_macro_name}' to {len(pets_to_send)} PET(s)")
+        print(f"   Total commands per PET: {total_commands}")
+
+        # Función para enviar comandos a un PET específico
+        def send_to_pet(pet_info, commands):
+            """Envía todos los comandos a un PET específico"""
+            pet_num = pet_info["pet_num"]
+            mac_source = pet_info["mac_source"]
+            mac_destiny = pet_info["mac_destiny"]
+            interface = pet_info["interface"]
+
+            try:
+                cmd_index = 1
+                total = sum(c["repetitions"] for c in commands)
+
+                for cmd_info in commands:
+                    repetitions = cmd_info["repetitions"]
+                    delta_time = cmd_info["delta_time"]
+
+                    for rep in range(repetitions):
+                        # Verificar cancelación
+                        if self.cancel_pet_sending:
+                            print(f"⚠️ PET {pet_num}: Cancelled after {cmd_index-1}/{total} commands")
+                            return
+
+                        # Construir y enviar paquete usando PacketSender
+                        try:
+                            # Obtener el byte del comando
+                            command_byte = COMMANDS.get(cmd_info["appendix_key"])
+                            if not command_byte:
+                                print(f"✗ PET {pet_num} Error: Command {cmd_info['appendix_key']} not found")
+                                continue
+
+                            # Enviar el paquete con parámetros individuales
+                            success = self.packet_sender.send_packet(
+                                mac_source=mac_source,
+                                mac_destiny=mac_destiny,
+                                interface=interface,
+                                command_byte=command_byte,
+                                verbose=False
+                            )
+
+                            rep_info = f" (rep {rep+1}/{repetitions})" if repetitions > 1 else ""
+                            if success:
+                                print(f"✓ PET {pet_num} [{cmd_index}/{total}]: {cmd_info['appendix_key']}{rep_info}")
+                            else:
+                                print(f"✗ PET {pet_num} Failed to send {cmd_info['appendix_key']}{rep_info}")
+
+                        except Exception as e:
+                            print(f"✗ PET {pet_num} Error in {cmd_info['appendix_key']}: {str(e)}")
+
+                        cmd_index += 1
+
+                        # Esperar delta_time después de cada envío
+                        delay_cancelled = False
+                        for _ in range(int(delta_time * 10)):
+                            if self.cancel_pet_sending:
+                                print(f"⚠️ PET {pet_num}: Cancelled after {cmd_index-1}/{total} commands")
+                                delay_cancelled = True
+                                break
+                            time.sleep(0.1)
+
+                        if delay_cancelled:
+                            return
+
+                if not self.cancel_pet_sending:
+                    print(f"✓ PET {pet_num}: All commands sent")
+
+            except Exception as e:
+                print(f"✗ PET {pet_num}: General error - {str(e)}")
+
+        # Función para coordinar todos los envíos
+        def send_all_pets():
+            threads = []
+
+            # Crear un thread por cada PET
+            for pet_info in pets_to_send:
+                thread = threading.Thread(
+                    target=send_to_pet,
+                    args=(pet_info, commands_to_send),
+                    daemon=True
+                )
+                threads.append(thread)
+                thread.start()
+
+            # Esperar a que todos los threads terminen
+            for thread in threads:
+                thread.join()
+
+            if not self.cancel_pet_sending:
+                print("✓ Sending completed to all PETs")
+
+            print("=" * 50)
+
+            # Restaurar botón (en el hilo principal)
+            self.after(0, self._restore_send_button)
+
+        # Ejecutar en thread
+        threading.Thread(target=send_all_pets, daemon=True).start()
+
+    def _restore_send_button(self):
+        """Restore send button to original state (must run in main thread)."""
+        self.sending_pet_commands = False
+        self.cancel_pet_sending = False
+        self.send_pet_btn.config(text="Send", bg="#27ae60")
+
+    def toggle_send_pet_commands(self):
+        """Toggle between sending and cancelling PET commands."""
+        if self.sending_pet_commands:
+            # Si está enviando, cancelar
+            self.cancel_pet_sending = True
+            print("⚠️ PET sending cancellation requested...")
+        else:
+            # Si no está enviando, iniciar envío
+            self.send_pet_commands()
 
 
     def register_mc(self):

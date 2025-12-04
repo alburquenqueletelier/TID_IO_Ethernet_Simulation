@@ -2,6 +2,7 @@ private/
 .venv/
 
 *.env
+PHASE*
 docs/para_revision.md
 docs/gant_image.png
 docs/gantt.pdf

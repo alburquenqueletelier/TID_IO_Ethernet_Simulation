@@ -1,3 +1,22 @@
+"""
+LEGACY VERSION - DEPRECATED
+
+This is the original monolithic version of the application.
+It is maintained for backwards compatibility but is deprecated.
+
+For the new modular version, use:
+    python main.py
+or:
+    python -m sensor_control_app.main
+
+The modular version provides:
+- Better code organization
+- Easier testing and maintenance
+- Reusable components
+- Cleaner architecture
+"""
+
+import warnings
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import psutil
@@ -12,6 +31,21 @@ from scapy.all import Ether, Raw, sendp
 import os
 import json
 import math
+
+# Show deprecation warning
+warnings.warn(
+    "\n\n"
+    "=" * 70 + "\n"
+    "WARNING: sensor_control_app.py is DEPRECATED!\n\n"
+    "Please use the new modular version instead:\n"
+    "    python main.py\n"
+    "or:\n"
+    "    python -m sensor_control_app.main\n\n"
+    "The monolithic version will be removed in a future release.\n"
+    "=" * 70,
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 appendix_dict = {

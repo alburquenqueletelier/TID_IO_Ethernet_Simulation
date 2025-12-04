@@ -1,52 +1,12 @@
-# TID - PET Scanner Control Application
+# TID 
 
-Application for communication between Computer and Microcontrollers (FPGAs)
+# Aplicación para comunicación entre Computadora y Micro Controlador
 
-Desktop application that enables communication with FPGAs (Microcontrollers) via Ethernet using a custom protocol for configuring PET scanners, debugging, and collecting sensor data.
+Aplicación de escritorio que permite la comunicación con FPGAs (Micro controladores) vía Ethernet usando protocolo personaliazdo para configurar PET SCAN, debuggin y recopilación de data de los sensores conectados a estas. 
 
-The system supports up to 10 FPGAs, each connected to the computer via Ethernet, receiving 1Gbit/s from each device during data capture.
+El dispositivo contará con 10 FPGAs conectadas cada una con la computadora donde corre la aplicación vía Ethernet, recibiendo 1GBit/s por cada uno de los dispositivos cuando esté capturando datos. 
 
----
-
-## Features
-
-- **Microcontroller Management**: Register and manage up to 10 FPGAs via Ethernet
-- **PET Scanner Association**: Associate microcontrollers with 10 PET scanner units
-- **Command Configuration**: Configure and send custom Layer 2 Ethernet commands
-- **Network Interface Discovery**: Automatic detection of available Ethernet interfaces
-- **Macro System**: Save and load command configurations as reusable macros
-- **Persistent Storage**: JSON-based database for configurations
-- **Real-time Monitoring**: Dashboard with live status of microcontrollers and PET scanners
-
----
-
-## Architecture
-
-The application is built with a modular architecture:
-
-```
-sensor_control_app/
-├── core/               # State management and data models
-├── network/            # Layer 2 networking (Scapy-based)
-├── storage/            # Database and macro management
-├── ui/                 # User interface components
-│   ├── app.py         # Main application window
-│   ├── widgets/       # Reusable UI components
-│   └── tabs/          # Dashboard and Commands tabs
-└── tests/             # Comprehensive test suite
-```
-
-### Key Technologies
-
-- **Python 3.11+**: Modern Python with type hints
-- **Tkinter**: Native GUI framework
-- **Scapy**: Layer 2 Ethernet packet manipulation
-- **psutil**: Network interface discovery
-- **unittest**: Testing framework
-
----
-
-## Requirements
+## Requerimientos
 
 ```bash
 contourpy==1.3.3
@@ -66,373 +26,369 @@ scapy==2.6.1
 six==1.17.0
 ```
 
----
+## Instalación
+Con gestor de ambiente venv
 
-## Installation
+1. Crear ambiente si no existe: `python3 -m venv .venv`
+2. Levantar ambiente: `source .venv/bin/activate`
+3. Instalar dependencias: `pip install -r requirements.txt`
+4. Instalar tkinter globalmente (no siempre viene) `sudo apt-get install python3-tk`
 
-### Using venv (recommended)
+# Estado actual
 
-1. **Create virtual environment** (if it doesn't exist):
-   ```bash
-   python3 -m venv .venv
-   ```
-
-2. **Activate environment**:
-   ```bash
-   source .venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Install tkinter globally** (if not already installed):
-   ```bash
-   sudo apt-get install python3-tk
-   ```
-
----
-
-## Running the Application
-
-The application requires **root privileges** because it uses raw sockets for Layer 2 Ethernet communication.
-
-### Recommended Method
-
-```bash
-sudo $(which python) main.py
-```
-
-The `$(which python)` ensures sudo uses the virtual environment Python instead of the global one.
-
-### Alternative Methods
-
-**As a module:**
-```bash
-sudo $(which python) -m sensor_control_app.main
-```
-
-**Legacy method** (deprecated, shows warning):
-```bash
-sudo $(which python) sensor_control_app.py
-```
-
----
-
-## Testing
-
-The project includes comprehensive tests for all modules:
-
-### Running Tests Locally
-
-**Option 1: Using the test script (recommended)**
-```bash
-# Auto-detect environment (uses Xvfb if available)
-./run_tests.sh
-
-# Force headless mode (requires Xvfb)
-./run_tests.sh headless
-
-# Force desktop mode (uses current display)
-./run_tests.sh desktop
-```
-
-**Option 2: Direct unittest execution**
-```bash
-# With current display
-python -m unittest discover -s sensor_control_app/tests -p "test_*.py" -v
-
-# With Xvfb (headless, for CI/CD)
-xvfb-run python -m unittest discover -s sensor_control_app/tests -p "test_*.py" -v
-```
-
-**Option 3: Using pytest** (if installed)
-```bash
-pytest sensor_control_app/tests/ -v
-```
-
-### Test Coverage
-
-- **Core modules**: State management, data models
-- **Network**: Interface discovery, packet sending
-- **Storage**: Database, macro management
-- **UI Widgets**: Scrollable frames, drag & drop, tooltips
-- **UI Tabs**: Dashboard, Commands
-- **Integration**: End-to-end workflows
-
-**Total tests**: 268 (263 passing, 5 pending fixes)
-
----
-
-## Configuration
-
-### Network Interfaces
-
-Copy `.env.example` to `.env` and configure:
-```bash
-cp .env.example .env
-```
-
-Use `ip a` on Linux to find interface names and MAC addresses.
-
-### Database
-
-Default location: `db.json` in project root
-
-The database stores:
-- Registered microcontrollers
-- Command configurations per MC
-- Universal and per-MC macros
-- PET-to-MC associations
-
----
-
-## Proof of Concept Scripts
-
-Layer 2 communication examples in `poc/layer2_communitacion/`:
-
-**Terminal 1** (receiver):
-```bash
-sudo $(which python) poc/layer2_communitacion/destination.py
-```
-
-**Terminal 2** (sender):
-```bash
-sudo $(which python) poc/layer2_communitacion/source.py
-```
-
-These demonstrate raw Ethernet frame communication using Scapy.
-
----
-
-## Project Structure
+## Estructura del proyecto
+Modelo Vista Controlador
 
 ```
-.
-├── main.py                       # Main entry point ⭐
-├── sensor_control_app.py         # Legacy entry point (deprecated)
-├── README.md                     # This file
-├── CLAUDE.md                     # Development guidelines for Claude Code
-├── requirements.txt              # Python dependencies
-├── .env.example                  # Environment configuration template
-├── pytest.ini                    # Test configuration
-├── run_tests.sh                  # Test runner script
-├── sensor_control_app/           # Main package
+sensor_control_app
+├── core
 │   ├── __init__.py
-│   ├── main.py                   # Package entry point
-│   ├── core/                     # State & models
-│   │   ├── __init__.py
-│   │   ├── models.py             # Data models
-│   │   ├── state_manager.py     # State management
-│   │   └── protocol.py          # Command protocol
-│   ├── network/                  # Networking
-│   │   ├── __init__.py
-│   │   ├── interface_discovery.py
-│   │   └── packet_sender.py
-│   ├── storage/                  # Persistence
-│   │   ├── __init__.py
-│   │   ├── database.py          # JSON database
-│   │   └── macro_manager.py     # Macro CRUD
-│   ├── ui/                       # User interface
-│   │   ├── __init__.py
-│   │   ├── app.py               # Main window
-│   │   ├── widgets/             # Reusable components
-│   │   │   ├── __init__.py
-│   │   │   ├── scrollable_frame.py
-│   │   │   ├── drag_drop_list.py
-│   │   │   └── tooltip.py
-│   │   └── tabs/                # Tab components
-│   │       ├── __init__.py
-│   │       ├── dashboard_tab.py
-│   │       └── commands_tab.py
-│   └── tests/                    # Test suite
-│       ├── conftest.py           # Shared test fixtures
-│       ├── test_*.py             # Module tests
-│       └── test_integration.py   # Integration tests
-├── poc/                          # Proof of concept scripts
-│   └── layer2_communitacion/
-└── .github/
-    └── workflows/
-        └── python-app.yml        # CI/CD configuration
+│   ├── models.py
+│   ├── protocol.py
+│   └── state_manager.py
+├── __init__.py
+├── main.py
+├── network
+│   ├── __init__.py
+│   ├── interface_discovery.py
+│   └── packet_sender.py
+├── storage
+│   ├── database.py
+│   ├── __init__.py
+│   └── macro_manager.py
+├── tests
+│   ├── conftest.py
+│   ├── __init__.py
+│   ├── README.md
+│   ├── test_app.py
+│   ├── test_commands_tab.py
+│   ├── test_dashboard_tab.py
+│   ├── test_database.py
+│   ├── test_drag_drop_list.py
+│   ├── test_integration.py
+│   ├── test_interface_discovery.py
+│   ├── test_macro_manager.py
+│   ├── test_models.py
+│   ├── test_packet_sender.py
+│   ├── test_protocol.py
+│   ├── test_scrollable_frame.py
+│   ├── test_state_manager.py
+│   └── test_tooltip.py
+├── ui
+│   ├── app.py
+│   ├── dialogs
+│   │   └── __init__.py
+│   ├── __init__.py
+│   ├── tabs
+│   │   ├── commands_tab.py
+│   │   ├── dashboard_tab.py
+│   │   └── __init__.py
+│   └── widgets
+│       ├── drag_drop_list.py
+│       ├── __init__.py
+│       ├── scrollable_frame.py
+│       └── tooltip.py
+└── utils
+    └── __init__.py
 ```
 
----
+## Separación de Responsabilidades
 
-## Development
+### 1. core/protocol.py
+**Responsabilidad:** Definir el protocolo de comunicación
 
-### Development Setup
+```python
+# Comandos del protocolo
+COMMANDS = {
+    "X_00_CPU": b"\x00",
+    "X_02_TestTrigger": b"\x02",
+    # ... resto de comandos
+}
 
-1. Clone the repository
-2. Set up virtual environment (see Installation)
-3. Install dependencies
-4. Run tests to verify setup
-
-### Code Style
-
-- Type hints for all functions
-- Docstrings for all public APIs
-- Maximum line length: 127 characters
-- Linting: flake8
-
-### Testing Guidelines
-
-- Write tests for all new features
-- Run tests before committing
-- Maintain test coverage above 95%
-- Use mocks for external dependencies
-
-### CI/CD
-
-Tests run automatically on push/PR to `main` branch via GitHub Actions.
-
----
-
-## Usage Guide
-
-### 1. Register Microcontrollers
-
-1. Launch the application
-2. Go to **Dashboard** tab
-3. Click "🔄 Refresh Interfaces" to discover network interfaces
-4. Click "➕ Register New MC" to add microcontrollers
-5. Enter MAC addresses and interface names
-
-### 2. Associate PET Scanners
-
-1. In **Dashboard** tab, scroll to "PET Scanner Associations"
-2. For each PET (1-10), select the associated microcontroller from dropdown
-3. Enable the checkbox to activate the PET
-4. Click "Save" from menu
-
-### 3. Configure Commands
-
-1. Go to **Commands** tab
-2. Select a microcontroller from dropdown
-3. Configure commands using checkboxes and radio buttons
-4. Set repetitions and delays as needed
-5. Click "💾 Save Current MC Config" to save
-
-### 4. Send Commands
-
-1. In **Commands** tab, configure desired commands
-2. Click "📡 Send Commands to Selected MC" to send to one MC
-3. Or use PET scanner macros to broadcast to multiple MCs
-4. Monitor progress in status label
-
-### 5. Use Macros
-
-**Save a macro:**
-1. Configure commands in Commands tab
-2. Click "💾 Save as Macro"
-3. Enter macro name
-
-**Load a macro:**
-1. Select macro from dropdown
-2. Click "📂 Load Macro"
-3. Commands are restored
-
----
-
-## Troubleshooting
-
-### "Permission denied" errors
-
-The application requires root privileges for raw sockets. Always use:
-```bash
-sudo $(which python) main.py
+# Configuraciones de comandos (HIGH/LOW, etc.)
+COMMAND_CONFIGS = {
+    "X_E1_FanSpeed0_High | X_E0_FanSpeed0_Low": {
+        "HIGH": "X_E1_FanSpeed0_High",
+        "LOW": "X_E0_FanSpeed0_Low"
+    },
+    # ... resto de configuraciones
+}
 ```
 
-### Virtual environment not used with sudo
+### 2. core/models.py
+**Responsabilidad:** Definir modelos de datos con dataclasses
 
-Make sure to use `$(which python)` instead of just `python`:
-```bash
-# ✅ Correct
-sudo $(which python) main.py
+```python
+from dataclasses import dataclass, field
+from typing import Optional, Dict
 
-# ❌ Wrong (uses system Python)
-sudo python main.py
+@dataclass
+class MicroController:
+    mac_source: str
+    mac_destiny: str
+    interface_destiny: str
+    label: str
+    command_configs: Dict = field(default_factory=dict)
+    last_state: Dict = field(default_factory=dict)
+    macros: Dict = field(default_factory=dict)
+
+@dataclass
+class PETAssociation:
+    pet_num: int
+    mc_mac: Optional[str] = None
+    enabled: bool = False
+
+@dataclass
+class Macro:
+    name: str
+    command_configs: Dict = field(default_factory=dict)
+    last_state: Dict = field(default_factory=dict)
 ```
 
-### Tkinter not found
+### 3. core/state_manager.py
+**Responsabilidad:** Gestionar el estado de la aplicación
 
-Install tkinter globally:
-```bash
-sudo apt-get install python3-tk
+```python
+class StateManager:
+    def __init__(self, database):
+        self.database = database
+        self.mc_registered: Dict[str, MicroController] = {}
+        self.mc_available: Dict[str, str] = {}
+        self.pet_associations: Dict[int, PETAssociation] = {}
+        self.macros: Dict[str, Macro] = {}
+
+    def register_mc(self, mc: MicroController) -> None
+    def unregister_mc(self, mac_source: str) -> None
+    def get_mc(self, mac_source: str) -> Optional[MicroController]
+    def associate_pet(self, pet_num: int, mc_mac: str) -> None
+    def get_pet_mcs(self, enabled_only: bool = False) -> List[MicroController]
 ```
 
-### Network interface not showing
+### 4. network/interface_discovery.py
+**Responsabilidad:** Detectar interfaces de red
 
-1. Check interface is up: `ip link show`
-2. Verify you're running with sudo
-3. Check .env configuration
+```python
+import psutil
 
-### Database errors
+class InterfaceDiscovery:
+    @staticmethod
+    def get_ethernet_interfaces() -> Dict[str, str]:
+        """Retorna {mac_address: interface_name}"""
+        # Lógica actual de refresh_mc_list()
 
-If `db.json` becomes corrupted:
-1. Stop the application
-2. Backup current db: `cp db.json db.json.backup`
-3. Delete db.json
-4. Restart application (creates new empty db)
+    @staticmethod
+    def is_interface_up(interface_name: str) -> bool:
+        """Verifica si una interfaz está activa"""
+```
 
----
+### 5. network/packet_sender.py
+**Responsabilidad:** Enviar paquetes Ethernet
 
-## Contributing
+```python
+from scapy.all import Ether, Raw, sendp
+import threading
 
-This is a university research project (TID - Taller de Investigación y Desarrollo) focusing on:
-- Building an open-source data acquisition system
-- Characterizing particle detectors (SiPMs)
-- Custom Ethernet protocol implementation
-- Real-time sensor data visualization
+class PacketSender:
+    def __init__(self):
+        self.sending = False
+        self.cancel_flag = False
 
-### Development Roadmap
+    def send_command(self,
+                    mac_source: str,
+                    mac_destiny: str,
+                    interface: str,
+                    command: bytes,
+                    repetitions: int = 1,
+                    delay_ms: int = 0) -> bool:
+        """Envía un comando via Ethernet"""
+        # Lógica extraída de send_command_packet()
 
-- [x] Phase 1: Project setup and monolithic prototype
-- [x] Phase 2: Core models and state management
-- [x] Phase 3: Network and storage modules
-- [x] Phase 4: UI widgets
-- [x] Phase 5: UI tabs
-- [x] Phase 6: Integration and entry points
-- [ ] Phase 7: Cleanup and final documentation
-- [ ] Future: Data visualization and analysis tools
+    def send_commands_batch(self, commands: List[CommandInfo],
+                           callback=None) -> None:
+        """Envía múltiples comandos en thread separado"""
+        # Lógica de send_all() en thread
 
----
+    def cancel(self) -> None:
+        """Cancela envío en progreso"""
+        self.cancel_flag = True
+```
 
-## License
+### 6. storage/database.py
+**Responsabilidad:** Persistencia en JSON
 
-This project is part of university research and is provided as-is for educational purposes.
+```python
+import json
+from pathlib import Path
 
----
+class Database:
+    def __init__(self, db_path: str = "db.json"):
+        self.db_path = Path(db_path)
+        self.data = {}
 
-## Release Notes
+    def load(self) -> dict:
+        """Carga datos desde JSON"""
+        # Lógica de init_database()
 
-Given that end users are experienced in programming, releases will be made through code updates with notifications. Packaging into a standalone executable may be considered later, but for now users are responsible for managing their own installations.
+    def save(self, data: dict) -> None:
+        """Guarda datos en JSON"""
+        # Lógica de update_db_stats()
 
-This approach allows users to:
-- Modify source code as needed
-- Directly edit the database file
-- Customize network configurations
-- Extend functionality
+    def get(self, key: str, default=None):
+        """Obtiene un valor"""
 
----
+    def set(self, key: str, value) -> None:
+        """Establece un valor y guarda"""
+```
 
-## Support
+### 7. storage/macro_manager.py
+**Responsabilidad:** Gestión de macros
 
-For issues, questions, or contributions:
-1. Check this README and CLAUDE.md
-2. Review test files for usage examples
-3. Examine the code documentation
-4. Contact the development team
+```python
+class MacroManager:
+    def __init__(self, database: Database):
+        self.database = database
 
----
+    def save_macro(self, name: str, macro: Macro,
+                   mc_mac: Optional[str] = None) -> None:
+        """Guarda macro universal o por MC"""
 
-## Acknowledgments
+    def load_macro(self, name: str,
+                   mc_mac: Optional[str] = None) -> Optional[Macro]:
+        """Carga macro"""
 
-- Universidad Adolfo Ibáñez (UAI)
-- TID Research Program
-- Contributors and testers
+    def delete_macro(self, name: str,
+                    mc_mac: Optional[str] = None) -> bool:
+        """Elimina macro"""
 
----
+    def list_macros(self, mc_mac: Optional[str] = None) -> List[str]:
+        """Lista macros disponibles"""
+```
 
-**Last Updated**: December 2, 2025
-**Version**: 2.0 (Modular Architecture)
+### 8. ui/app.py
+**Responsabilidad:** Coordinación de la UI
+
+```python
+import tkinter as tk
+from tkinter import ttk
+
+class McControlApp:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+
+        # Inyección de dependencias
+        self.database = Database()
+        self.state_manager = StateManager(self.database)
+        self.packet_sender = PacketSender()
+        self.macro_manager = MacroManager(self.database)
+        self.interface_discovery = InterfaceDiscovery()
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Configura la interfaz principal"""
+        self.notebook = ttk.Notebook(self.root)
+
+        # Crear pestañas con inyección de dependencias
+        self.dashboard_tab = DashboardTab(
+            self.notebook,
+            self.state_manager,
+            self.packet_sender,
+            self.macro_manager
+        )
+        self.commands_tab = CommandsTab(
+            self.notebook,
+            self.state_manager,
+            self.packet_sender,
+            self.macro_manager
+        )
+```
+
+### 9. ui/widgets/scrollable_frame.py
+**Responsabilidad:** Widget reutilizable para scroll
+
+```python
+class ScrollableFrame(ttk.Frame):
+    """Frame con scroll integrado"""
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+
+        self.canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self, orient="vertical",
+                                     command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+
+        # Setup similar al patrón actual
+        # Extraído de create_dashboard_tab() y create_commands_tab()
+```
+
+### 10. ui/widgets/drag_drop_list.py
+**Responsabilidad:** Lista con drag & drop
+
+```python
+class DragDropList(ttk.Frame):
+    """Lista con reordenamiento drag & drop"""
+    def __init__(self, parent, items=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        # Lógica de setup_drag_and_drop(), start_drag(),
+        # do_drag(), end_drag(), reorder_commands()
+```
+
+### 11. ui/tabs/dashboard_tab.py
+**Responsabilidad:** Pestaña Dashboard
+
+```python
+class DashboardTab(ttk.Frame):
+    def __init__(self, parent, state_manager, packet_sender, macro_manager):
+        super().__init__(parent)
+        self.state_manager = state_manager
+        self.packet_sender = packet_sender
+        self.macro_manager = macro_manager
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Construye la UI del dashboard"""
+        # Lógica extraída de create_dashboard_tab()
+        self.create_mc_table()
+        self.create_pet_section()
+        self.create_macro_section()
+```
+
+### 12. ui/tabs/commands_tab.py
+**Responsabilidad:** Pestaña Comandos
+
+```python
+class CommandsTab(ttk.Frame):
+    def __init__(self, parent, state_manager, packet_sender, macro_manager):
+        super().__init__(parent)
+        self.state_manager = state_manager
+        self.packet_sender = packet_sender
+        self.macro_manager = macro_manager
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Construye la UI de comandos"""
+        # Lógica extraída de create_commands_tab()
+        self.create_mc_selector()
+        self.create_command_list()
+        self.create_control_buttons()
+```
+
+## Ejecución
+1. Activar ambiente virtual de python: `source .venv/bin/activate`
+2. Ejecutar app con: `sudo $(which python) main.py`
+
+### Correr Test
+1. `./run_test.sh` o `python -m unittest discover -s sensor_control_app/tests -p "test_*.py" -v`
+
+**Nota:** otorgue permisos de modificación al script run_test `chmod +x run_test.sh` o ejecutelo con `bash run_test.sh`
+
+# Deprecado
+Versión anterior monolítica contenida en el archivo `sensor_control_app.py` con funcionalidades para:
+1. Emparejar FPGA con Interfaz de computadora
+2. Gestionar Macros de FGPA con sus comandos (no incluye comandos de CPU)
+3. Enviar Macro a todos los PET Scan conectados a las FPGA
+
+## Ejecución
+Ejecutar: `sudo $(which python) sensor_control_app.py`

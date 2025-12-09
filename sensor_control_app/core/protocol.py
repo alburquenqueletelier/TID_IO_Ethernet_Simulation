@@ -40,6 +40,9 @@ COMMANDS = {
 # Configuraciones de comandos con sus estados posibles
 # Formato: {"nombre_visible": {"estado": "comando_real", ...}}
 COMMAND_CONFIGS = {
+    "X_00_CPU": {
+        "ON": "X_00_CPU"
+    },
     "X_02_TestTrigger": {
         "ON": "X_02_TestTrigger"
     },

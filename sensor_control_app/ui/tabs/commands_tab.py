@@ -126,6 +126,15 @@ class CommandsTab(ttk.Frame):
         )
         refresh_btn.pack(side="left", padx=2)
 
+        # Connection status label
+        self.connection_status_label = tk.Label(
+            header_frame,
+            text="",
+            font=("Arial", 10, "italic"),
+            fg="#e74c3c"
+        )
+        self.connection_status_label.pack()
+
         # Action buttons frame (below MC selection)
         action_buttons_frame = ttk.Frame(header_frame)
         action_buttons_frame.pack(fill="x", pady=5)
@@ -297,12 +306,16 @@ class CommandsTab(ttk.Frame):
             self.mc_combo.set(mc_options[0])
             self.on_mc_selected(None)
 
+        # Update connection status for currently selected MC
+        self.update_connection_status()
+
     def on_mc_selected(self, event):
         """Handle MC selection change."""
         selection = self.mc_combo.get()
 
         if not selection:
             self.selected_mc_mac = None
+            self.update_connection_status()
             return
 
         # Extract MAC from "Label (MAC)" format
@@ -313,8 +326,27 @@ class CommandsTab(ttk.Frame):
             if mc:
                 self.selected_mc_mac = mc.mac_source
                 self.load_mc_commands(mc.mac_source)
+                self.update_connection_status()
         except (IndexError, AttributeError):
             self.selected_mc_mac = None
+            self.update_connection_status()
+
+    def update_connection_status(self):
+        """Update the connection status label based on selected MC."""
+        if not self.selected_mc_mac:
+            self.connection_status_label.config(text="")
+            return
+
+        # Check if the selected MC is in the available (connected) MCs
+        is_connected = self.selected_mc_mac in self.state_manager.mc_available
+
+        if is_connected:
+            self.connection_status_label.config(text="")
+        else:
+            self.connection_status_label.config(
+                text="Disconnected",
+                fg="#e74c3c"
+            )
 
     def load_mc_commands(self, mac_source: str):
         """

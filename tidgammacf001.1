@@ -1,0 +1,887 @@
+.\" Man page generated from reStructuredText.
+.
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.TH "TIDGAMMACF001" "1" "Dec 12, 2025" "" "TID Gamma CF001"
+.SH NAME
+tidgammacf001 \- TID Gamma CF001 0.1.0
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app\fP
+T}	T{
+PET Scan Control Application
+T}
+_
+T{
+\fI\%main\fP
+T}	T{
+Main entry point for PET Scanner Control Application (Modular Version).
+T}
+_
+.TE
+.SH SENSOR_CONTROL_APP
+.sp
+PET Scan Control Application
+.sp
+Sistema de control y adquisición de datos para PET scans vía Ethernet.
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.core\fP
+T}	T{
+Core module for PET scan control application.
+T}
+_
+T{
+\fI\%sensor_control_app.main\fP
+T}	T{
+Main entry point for the PET Scanner Control Application.
+T}
+_
+T{
+\fI\%sensor_control_app.network\fP
+T}	T{
+Network package for PET scan control application.
+T}
+_
+T{
+\fI\%sensor_control_app.storage\fP
+T}	T{
+Storage package for PET scan control application.
+T}
+_
+T{
+\fI\%sensor_control_app.tests\fP
+T}	T{
+Test suite for sensor_control_app.
+T}
+_
+T{
+\fI\%sensor_control_app.ui\fP
+T}	T{
+User interface package.
+T}
+_
+T{
+\fI\%sensor_control_app.utils\fP
+T}	T{
+Utility functions.
+T}
+_
+.TE
+.SS sensor_control_app.core
+.sp
+Core module for PET scan control application.
+.sp
+This module contains the business logic, protocol definitions,
+data models, and state management.
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.core.models\fP
+T}	T{
+Data models for the PET scan control application.
+T}
+_
+T{
+\fI\%sensor_control_app.core.protocol\fP
+T}	T{
+Protocol definitions for PET scan microcontroller communication.
+T}
+_
+T{
+\fI\%sensor_control_app.core.state_manager\fP
+T}	T{
+State management for the PET scan control application.
+T}
+_
+.TE
+.SS sensor_control_app.core.models
+.sp
+Data models for the PET scan control application.
+.sp
+This module defines the core data structures using dataclasses for type safety
+and better code organization.
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBCommandInfo\fP(config_name, command_name, ...)
+T}	T{
+Información sobre un comando a enviar.
+T}
+_
+T{
+\fBMacro\fP(name, command_configs, ...)
+T}	T{
+Representa una macro de comandos reutilizable.
+T}
+_
+T{
+\fBMicroController\fP(mac_source, mac_destiny, ...)
+T}	T{
+Representa un microcontrolador (FPGA) registrado en el sistema.
+T}
+_
+T{
+\fBPETAssociation\fP(pet_num[, mc_mac, enabled])
+T}	T{
+Representa la asociación entre un PET scanner y un microcontrolador.
+T}
+_
+.TE
+.SS sensor_control_app.core.protocol
+.sp
+Protocol definitions for PET scan microcontroller communication.
+.sp
+This module defines the Layer 2 Ethernet protocol commands and their configurations
+used to communicate with FPGAs (microcontrollers) in the PET scan system.
+.sp
+Functions
+.TS
+center;
+|l|l|.
+_
+T{
+\fBget_all_command_names\fP()
+T}	T{
+Obtiene lista de todos los nombres de comandos disponibles.
+T}
+_
+T{
+\fBget_all_config_names\fP()
+T}	T{
+Obtiene lista de todos los nombres de configuraciones disponibles.
+T}
+_
+T{
+\fBget_command_byte\fP(command_name)
+T}	T{
+Obtiene el byte correspondiente a un comando.
+T}
+_
+T{
+\fBget_command_states\fP(config_name)
+T}	T{
+Obtiene los estados posibles de una configuración de comando.
+T}
+_
+T{
+\fBis_valid_command\fP(command_name)
+T}	T{
+Verifica si un comando es válido.
+T}
+_
+T{
+\fBis_valid_config\fP(config_name)
+T}	T{
+Verifica si una configuración de comando es válida.
+T}
+_
+.TE
+.SS sensor_control_app.core.state_manager
+.sp
+State management for the PET scan control application.
+.sp
+This module provides centralized state management for microcontrollers,
+PET scanner associations, and macros.
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBStateManager\fP([database])
+T}	T{
+Gestiona el estado de la aplicación.
+T}
+_
+.TE
+.SS sensor_control_app.main
+.sp
+Main entry point for the PET Scanner Control Application.
+.sp
+This module provides the main entry point for the modular version
+of the application. It can be run as:
+.INDENT 0.0
+.INDENT 3.5
+python \-m sensor_control_app.main
+.UNINDENT
+.UNINDENT
+.sp
+Or directly:
+.INDENT 0.0
+.INDENT 3.5
+python sensor_control_app/main.py
+.UNINDENT
+.UNINDENT
+.sp
+For root privileges (required for raw sockets):
+.INDENT 0.0
+.INDENT 3.5
+sudo $(which python) \-m sensor_control_app.main
+.UNINDENT
+.UNINDENT
+.SS sensor_control_app.network
+.sp
+Network package for PET scan control application.
+.sp
+This package handles all network\-related functionality including:
+\- Ethernet interface discovery
+\- Raw packet transmission (Layer 2)
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.network.interface_discovery\fP
+T}	T{
+Interface discovery module for detecting Ethernet interfaces.
+T}
+_
+T{
+\fI\%sensor_control_app.network.packet_sender\fP
+T}	T{
+Packet sender module for transmitting raw Ethernet frames.
+T}
+_
+.TE
+.SS sensor_control_app.network.interface_discovery
+.sp
+Interface discovery module for detecting Ethernet interfaces.
+.sp
+This module provides functionality to discover available Ethernet interfaces
+on the system, excluding virtual interfaces, loopback, WiFi, and other
+non\-physical interfaces.
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBInterfaceDiscovery\fP()
+T}	T{
+Handles discovery of Ethernet network interfaces.
+T}
+_
+.TE
+.SS sensor_control_app.network.packet_sender
+.sp
+Packet sender module for transmitting raw Ethernet frames.
+.sp
+This module handles the transmission of Layer 2 Ethernet packets using Scapy.
+It supports single packet transmission and batch sending with repetitions and delays.
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBPacketInfo\fP(mac_source, mac_destiny, ...[, ...])
+T}	T{
+Information about a packet to send.
+T}
+_
+T{
+\fBPacketSender\fP()
+T}	T{
+Handles sending raw Ethernet packets using Scapy.
+T}
+_
+.TE
+.SS sensor_control_app.storage
+.sp
+Storage package for PET scan control application.
+.sp
+This package handles all persistence\-related functionality including:
+\- JSON database management
+\- Macro CRUD operations
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.storage.database\fP
+T}	T{
+Database module for JSON\-based persistence.
+T}
+_
+T{
+\fI\%sensor_control_app.storage.macro_manager\fP
+T}	T{
+Macro manager module for handling command macros.
+T}
+_
+.TE
+.SS sensor_control_app.storage.database
+.sp
+Database module for JSON\-based persistence.
+.sp
+This module handles loading and saving application data to a JSON file,
+including microcontroller registrations, macros, and PET associations.
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBDatabase\fP([db_path])
+T}	T{
+Manages JSON\-based database for application persistence.
+T}
+_
+.TE
+.SS sensor_control_app.storage.macro_manager
+.sp
+Macro manager module for handling command macros.
+.sp
+This module provides functionality to create, save, load, and delete
+command macros (both universal and per\-microcontroller).
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBMacroManager\fP(database)
+T}	T{
+Manages command macros for the application.
+T}
+_
+.TE
+.SS sensor_control_app.tests
+.sp
+Test suite for sensor_control_app.
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.tests.conftest\fP
+T}	T{
+Configuración compartida para tests.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_app\fP
+T}	T{
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_commands_tab\fP
+T}	T{
+Tests for the commands_tab module.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_dashboard_tab\fP
+T}	T{
+Tests for the dashboard_tab module.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_database\fP
+T}	T{
+Tests for the database module.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_drag_drop_list\fP
+T}	T{
+Tests for the drag_drop_list widget.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_integration\fP
+T}	T{
+Integration tests for the complete PET Scanner Control Application.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_interface_discovery\fP
+T}	T{
+Tests for the interface_discovery module.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_macro_manager\fP
+T}	T{
+Tests for the macro_manager module.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_models\fP
+T}	T{
+Tests unitarios para el módulo models.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_packet_sender\fP
+T}	T{
+Tests for the packet_sender module.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_protocol\fP
+T}	T{
+Tests unitarios para el módulo protocol.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_scrollable_frame\fP
+T}	T{
+Tests for the scrollable_frame widget.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_state_manager\fP
+T}	T{
+Tests unitarios para el módulo state_manager.
+T}
+_
+T{
+\fI\%sensor_control_app.tests.test_tooltip\fP
+T}	T{
+Tests for the tooltip widget.
+T}
+_
+.TE
+.SS sensor_control_app.tests.conftest
+.sp
+Configuración compartida para tests.
+.sp
+Este archivo se carga automáticamente por pytest antes de ejecutar tests.
+Para unittest, las funciones están disponibles pero deben ser llamadas manualmente.
+.SS sensor_control_app.tests.test_app
+.SS sensor_control_app.tests.test_commands_tab
+.sp
+Tests for the commands_tab module.
+.sp
+Tests CommandsTab component functionality including
+initialization, UI structure, and command configuration.
+.SS sensor_control_app.tests.test_dashboard_tab
+.sp
+Tests for the dashboard_tab module.
+.sp
+Tests DashboardTab component functionality including
+initialization, UI structure, and basic interactions.
+.SS sensor_control_app.tests.test_database
+.sp
+Tests for the database module.
+.sp
+Tests JSON\-based database functionality including
+loading, saving, and CRUD operations.
+.SS sensor_control_app.tests.test_drag_drop_list
+.sp
+Tests for the drag_drop_list widget.
+.sp
+Tests DragDropList widget functionality including
+item management and drag & drop reordering.
+.SS sensor_control_app.tests.test_integration
+.sp
+Integration tests for the complete PET Scanner Control Application.
+.sp
+These tests verify that all components work together correctly:
+\- Application initialization
+\- Database persistence
+\- Tab integration
+\- Component communication
+\- End\-to\-end workflows
+.SS sensor_control_app.tests.test_interface_discovery
+.sp
+Tests for the interface_discovery module.
+.sp
+Tests network interface discovery functionality including
+Ethernet interface detection and filtering.
+.SS sensor_control_app.tests.test_macro_manager
+.sp
+Tests for the macro_manager module.
+.sp
+Tests macro management functionality including saving, loading,
+and deleting both universal and microcontroller\-specific macros.
+.SS sensor_control_app.tests.test_models
+.sp
+Tests unitarios para el módulo models.
+.sp
+Verifica que los modelos de datos (dataclasses) funcionen correctamente
+y que la serialización/deserialización sea correcta.
+.SS sensor_control_app.tests.test_packet_sender
+.sp
+Tests for the packet_sender module.
+.sp
+Tests packet transmission functionality including single packets,
+batch sending, and cancellation.
+.SS sensor_control_app.tests.test_protocol
+.sp
+Tests unitarios para el módulo protocol.
+.sp
+Verifica que el protocolo de comunicación esté correctamente definido
+y que las funciones de acceso funcionen como esperado.
+.SS sensor_control_app.tests.test_scrollable_frame
+.sp
+Tests for the scrollable_frame widget.
+.sp
+Tests ScrollableFrame widget functionality including
+scroll region updates and mousewheel support.
+.SS sensor_control_app.tests.test_state_manager
+.sp
+Tests unitarios para el módulo state_manager.
+.sp
+Verifica que la gestión de estado funcione correctamente para
+microcontroladores, asociaciones PET y macros.
+.SS sensor_control_app.tests.test_tooltip
+.sp
+Tests for the tooltip widget.
+.sp
+Tests ToolTip widget functionality including
+showing, hiding, and updating tooltips.
+.SS sensor_control_app.ui
+.sp
+User interface package.
+.sp
+This package provides the main UI components:
+\- app: Main application window
+\- widgets: Reusable UI widgets
+\- tabs: Tab components (Dashboard, Commands)
+\- dialogs: Dialog windows (future)
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.ui.app\fP
+T}	T{
+Main application window module.
+T}
+_
+T{
+\fI\%sensor_control_app.ui.dialogs\fP
+T}	T{
+UI dialog components.
+T}
+_
+T{
+\fI\%sensor_control_app.ui.tabs\fP
+T}	T{
+UI tabs package.
+T}
+_
+T{
+\fI\%sensor_control_app.ui.widgets\fP
+T}	T{
+Reusable UI widgets package.
+T}
+_
+.TE
+.SS sensor_control_app.ui.app
+.sp
+Main application window module.
+.sp
+This module provides the main application window that integrates
+all components: Dashboard, Commands, and future tabs.
+.sp
+Functions
+.TS
+center;
+|l|l|.
+_
+T{
+\fBmain\fP()
+T}	T{
+Main entry point for the modular application.
+T}
+_
+.TE
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBMcControlApp\fP(root[, db_path])
+T}	T{
+Main application window.
+T}
+_
+.TE
+.SS sensor_control_app.ui.dialogs
+.sp
+UI dialog components.
+.SS sensor_control_app.ui.tabs
+.sp
+UI tabs package.
+.sp
+This package provides the main tab components for the application:
+\- DashboardTab: Main dashboard with MC registration and PET management
+\- CommandsTab: Command configuration and sending interface
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.ui.tabs.commands_tab\fP
+T}	T{
+Commands tab module.
+T}
+_
+T{
+\fI\%sensor_control_app.ui.tabs.dashboard_tab\fP
+T}	T{
+Dashboard tab module.
+T}
+_
+.TE
+.SS sensor_control_app.ui.tabs.commands_tab
+.sp
+Commands tab module.
+.sp
+This module provides the Commands tab component which handles:
+\- Command configuration interface
+\- Command sending with repetitions
+\- Command management (add/remove command instances)
+\- Macro save/load functionality
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBCommandsTab\fP(*args, **kwargs)
+T}	T{
+Commands tab component.
+T}
+_
+.TE
+.SS sensor_control_app.ui.tabs.dashboard_tab
+.sp
+Dashboard tab module.
+.sp
+This module provides the Dashboard tab component which displays:
+\- Registered microcontrollers table
+\- Network interface monitoring
+\- PET scanner associations
+\- Command macro management for PET scanners
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBDashboardTab\fP(*args, **kwargs)
+T}	T{
+Dashboard tab component.
+T}
+_
+.TE
+.SS sensor_control_app.ui.widgets
+.sp
+Reusable UI widgets package.
+.sp
+This package provides reusable Tkinter widgets including:
+\- ScrollableFrame: Frame with integrated vertical scrollbar
+\- DragDropList: List widget with drag & drop reordering
+\- ToolTip: Hover tooltip for widgets
+.sp
+Modules
+.TS
+center;
+|l|l|.
+_
+T{
+\fI\%sensor_control_app.ui.widgets.drag_drop_list\fP
+T}	T{
+Drag and drop list widget for reorderable items.
+T}
+_
+T{
+\fI\%sensor_control_app.ui.widgets.scrollable_frame\fP
+T}	T{
+Scrollable frame widget with integrated vertical scrollbar.
+T}
+_
+T{
+\fI\%sensor_control_app.ui.widgets.tooltip\fP
+T}	T{
+Tooltip widget for displaying hover hints.
+T}
+_
+.TE
+.SS sensor_control_app.ui.widgets.drag_drop_list
+.sp
+Drag and drop list widget for reorderable items.
+.sp
+This widget provides a reusable drag & drop list component that allows
+users to reorder items by dragging them to new positions.
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBDragDropList\fP(*args, **kwargs)
+T}	T{
+A list widget with drag & drop reordering capability.
+T}
+_
+.TE
+.SS sensor_control_app.ui.widgets.scrollable_frame
+.sp
+Scrollable frame widget with integrated vertical scrollbar.
+.sp
+This widget provides a reusable scrollable frame component with
+automatic scroll region updates and mousewheel support.
+.sp
+Functions
+.TS
+center;
+|l|l|.
+_
+T{
+\fBcreate_scrollable_frame\fP(parent)
+T}	T{
+Create a scrollable frame (backwards compatible function).
+T}
+_
+.TE
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBScrollableFrame\fP(*args, **kwargs)
+T}	T{
+A frame with integrated vertical scrollbar and mousewheel support.
+T}
+_
+.TE
+.SS sensor_control_app.ui.widgets.tooltip
+.sp
+Tooltip widget for displaying hover hints.
+.sp
+This module provides a simple tooltip implementation that shows
+helpful text when hovering over widgets.
+.sp
+Functions
+.TS
+center;
+|l|l|.
+_
+T{
+\fBcreate_tooltip\fP(widget, text, **kwargs)
+T}	T{
+Convenience function to create a tooltip.
+T}
+_
+.TE
+.sp
+Classes
+.TS
+center;
+|l|l|.
+_
+T{
+\fBBalloonTip\fP(widget, text[, delay, bg, fg, ...])
+T}	T{
+Alternative name for ToolTip (for backwards compatibility).
+T}
+_
+T{
+\fBToolTip\fP(widget, text[, delay, bg, fg, font, ...])
+T}	T{
+A simple tooltip that displays text when hovering over a widget.
+T}
+_
+.TE
+.SS sensor_control_app.utils
+.sp
+Utility functions.
+.SH MAIN
+.sp
+Main entry point for PET Scanner Control Application (Modular Version).
+.sp
+This is the recommended entry point for the refactored modular application.
+.INDENT 0.0
+.TP
+.B Usage:
+python main.py
+.TP
+.B With sudo (required for raw sockets):
+sudo $(which python) main.py
+.TP
+.B Or as a module:
+python \-m sensor_control_app.main
+.UNINDENT
+.INDENT 0.0
+.IP \(bu 2
+\fI\%Index\fP
+.IP \(bu 2
+\fI\%Module Index\fP
+.IP \(bu 2
+\fI\%Search Page\fP
+.UNINDENT
+.SH AUTHOR
+Cristian Fuentes, Bryan Alburquenque
+.SH COPYRIGHT
+2025, Cristian Fuentes, Bryan Alburquenque
+.\" Generated by docutils manpage writer.
+.

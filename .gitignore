@@ -1,12 +1,19 @@
 private/
 .venv/
 
+# environment variables
 *.env
 PHASE*
+
+# documentation
 docs/para_revision.md
 docs/gant_image.png
 docs/gantt.pdf
+build/
+source/stubs/
+docs/logo-fic.jpg
 
+# data base
 db.json
 
 __pycache__/

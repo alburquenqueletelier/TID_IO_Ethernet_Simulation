@@ -39,9 +39,100 @@ COMMANDS = {
 
 # Configuraciones de comandos con sus estados posibles
 # Formato: {"nombre_visible": {"estado": "comando_real", ...}}
+# Para comandos compuestos: {"type": "composite", "actions": {...}}
 COMMAND_CONFIGS = {
     "X_00_CPU": {
-        "ON": "X_00_CPU"
+        "type": "composite",
+        "actions": {
+            "JTAG Write Registers ASICs": {
+                "parameters": [
+                    {
+                        "name": "targeted_asic_number",
+                        "label": "Targeted ASIC Number",
+                        "type": "string",
+                        "byte_index": 0
+                    },
+                    {
+                        "name": "targeted_register_number",
+                        "label": "Targeted Register Number",
+                        "type": "string",
+                        "byte_index": 1
+                    },
+                    {
+                        "name": "length_instruction",
+                        "label": "Length instruction (In Bits)",
+                        "type": "string",
+                        "byte_indices": [2, 3]  # 2-byte field
+                    },
+                    {
+                        "name": "data_to_write",
+                        "label": "Data To Write",
+                        "type": "string",
+                        "byte_index": 4
+                    }
+                ]
+            },
+            "Vbias (SPI to PowerBoard)": {
+                "parameters": [
+                    {
+                        "name": "targeted_asic_number",
+                        "label": "Targeted ASIC Number",
+                        "type": "string",
+                        "byte_index": 0
+                    },
+                    {
+                        "name": "targeted_register_number",
+                        "label": "Targeted Register Number",
+                        "type": "string",
+                        "byte_index": 1
+                    },                    
+                    {
+                        "name": "length_instruction",
+                        "label": "Length instruction (In Bits)",
+                        "type": "string",
+                        "byte_indices": [2, 3]  # 2-byte field
+                    },
+                    {
+                        "name": "data_to_write",
+                        "label": "Data To Write (READ T°)",
+                        "type": "string",
+                        "byte_index": 4
+                    }
+                ]
+            },
+            "JTAG read Chip ID and check number of chips in the chain": { 
+                "parameters": [
+                    {
+                        "name": "targeted_asic_number",
+                        "label": "Targeted Register Number",
+                        "type": "string",
+                        "byte_index": 0
+                    }
+                ]
+            },
+            "Define Destination Mac address" : {
+                "parameters": [
+                    {
+                        "name": "targeted_asic_number",
+                        "label": "Targeted ASIC Number",
+                        "type": "string",
+                        "byte_index": 0
+                    },
+                    {
+                        "name": "targeted_register_number",
+                        "label": "Targeted Register Number",
+                        "type": "string",
+                        "byte_index": 1
+                    },
+                    {
+                        "name": "length_instruction",
+                        "label": "Length instruction (In Bits)",
+                        "type": "string",
+                        "byte_indices": [2, 3]  # 2-byte field
+                    },
+                ]
+            }
+        }
     },
     "X_02_TestTrigger": {
         "ON": "X_02_TestTrigger"

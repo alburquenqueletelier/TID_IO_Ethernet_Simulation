@@ -23,6 +23,7 @@ class PacketInfo:
     command_name: str = ""
     repetitions: int = 1
     delay_ms: int = 0
+    extra_payload: bytes = b''  # Additional bytes after command_byte for composite commands
 
 
 class PacketSender:
@@ -50,6 +51,7 @@ class PacketSender:
         mac_destiny: str,
         interface: str,
         command_byte: bytes,
+        extra_payload: bytes = b'',
         verbose: bool = False
     ) -> bool:
         """
@@ -86,7 +88,9 @@ class PacketSender:
                 raise ValueError("MAC addresses must be 6 bytes")
 
             # Construct packet
-            length_bytes = self.PAYLOAD_LENGTH.to_bytes(2, byteorder="big")
+            # Calculate payload length: base 7 bytes + extra_payload length
+            payload_length = self.PAYLOAD_LENGTH + len(extra_payload)
+            length_bytes = payload_length.to_bytes(2, byteorder="big")
 
             packet = (
                 mac_destiny_bytes
@@ -95,6 +99,7 @@ class PacketSender:
                 + self.PADDING_BYTES
                 + self.CONSTANT_BYTES
                 + command_byte
+                + extra_payload  # Additional bytes for composite commands
             )
 
             # Send packet using Scapy
@@ -139,6 +144,7 @@ class PacketSender:
                     packet_info.mac_destiny,
                     packet_info.interface,
                     packet_info.command_byte,
+                    extra_payload=packet_info.extra_payload,
                     verbose=False
                 )
 

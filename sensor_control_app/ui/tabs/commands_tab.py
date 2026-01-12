@@ -409,6 +409,11 @@ class CommandsTab(ttk.Frame):
 
     def create_command_table_row(self, cmd_name: str, cmd_config: Dict, last_state_value: str):
         """Create a table row for a command."""
+        # Check if this is a composite command
+        if isinstance(cmd_config, dict) and cmd_config.get("type") == "composite":
+            self.create_composite_command_row(cmd_name, cmd_config, last_state_value)
+            return
+
         bg_color = "#f7f7f7"
         row_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color, height=35)
         row_frame.pack(fill="x")
@@ -789,6 +794,198 @@ class CommandsTab(ttk.Frame):
                 if off_btn:
                     off_btn.config(bg="#e74c3c", relief="sunken")
 
+    def create_composite_command_row(self, cmd_name: str, cmd_config: Dict, last_state_value: str):
+        """Create a row for a composite command with action dropdown and dynamic parameters."""
+        bg_color = "#f7f7f7"
+
+        # Main container frame
+        main_frame = tk.Frame(self.commands_table_frame, relief="ridge", borderwidth=1, bg=bg_color)
+        main_frame.pack(fill="x", pady=2)
+
+        # Top row frame (checkbox, label, action dropdown, delay)
+        top_frame = tk.Frame(main_frame, bg=bg_color)
+        top_frame.pack(fill="x", padx=5, pady=5)
+
+        # Get saved state
+        mc = self.state_manager.get_mc(self.selected_mc_mac)
+        saved_enabled = False
+        saved_action = "Select an option"
+        saved_delay = 1.0
+
+        if mc and hasattr(mc, 'last_state'):
+            saved_enabled = mc.last_state.get(f"{cmd_name}_enabled", False)
+            saved_action = mc.last_state.get(cmd_name, "Select an option")
+            saved_delay = mc.last_state.get(f"{cmd_name}_delta", 1.0)
+
+        # Initialize state structure with empty parameter dict
+        # We'll populate it dynamically based on selected action
+        self.commands_state[cmd_name] = {
+            "enabled": tk.BooleanVar(value=saved_enabled),
+            "type": "composite",
+            "selected_action": tk.StringVar(value=saved_action),
+            "parameters": {},
+            "delta_time": tk.DoubleVar(value=saved_delay),
+            "parameter_frame": None,
+            "parameter_widgets": {},
+            "action_frames": {}
+        }
+
+        # Checkbox
+        checkbox = tk.Checkbutton(
+            top_frame, variable=self.commands_state[cmd_name]["enabled"], bg=bg_color
+        )
+        checkbox.pack(side="left", padx=5)
+
+        # Command label
+        tk.Label(
+            top_frame, text=cmd_name, width=30, font=("Arial", 9), bg=bg_color, anchor="w"
+        ).pack(side="left")
+
+        # Get available actions from config
+        # Actions as columns
+        actions = list(cmd_config["actions"].keys())
+        actions_frame = tk.Frame(main_frame, bg=bg_color)
+        actions_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+        for idx, action in enumerate(actions):
+            # Frame for each action column
+            col_frame = tk.Frame(actions_frame, bg="#e9f7ef" if saved_action == action else "#f7f7f7", bd=2, relief="groove")
+            col_frame.grid(row=0, column=idx, padx=5, sticky="n")
+
+            # Action name as clickable label
+            action_label = tk.Label(
+                col_frame, text=action, font=("Arial", 9, "bold"), bg=col_frame["bg"], cursor="hand2"
+            )
+            action_label.pack(pady=(2, 4), fill="x")
+
+            # Parameters for this action
+            param_defs = cmd_config["actions"][action]["parameters"]
+            param_vars = {}
+            for i, param_def in enumerate(param_defs):
+                param_name = param_def["name"]
+                param_label = param_def["label"]
+                # Get saved value
+                mc = self.state_manager.get_mc(self.selected_mc_mac)
+                saved_value = ""
+                if mc and hasattr(mc, 'last_state'):
+                    saved_value = mc.last_state.get(f"{cmd_name}_{param_name}", "")
+                param_var = tk.StringVar(value=saved_value)
+                param_vars[param_name] = param_var
+
+                tk.Label(
+                    col_frame, text=f"{param_label}:", bg=col_frame["bg"], font=("Arial", 8)
+                ).pack(anchor="w", padx=5)
+                entry = tk.Entry(col_frame, textvariable=param_var, width=18)
+                entry.pack(anchor="w", padx=5, pady=(0, 2))
+
+                # Save widget reference
+                self.commands_state[cmd_name]["parameter_widgets"][f"{action}_{param_name}"] = entry
+
+            # Store parameter vars for this action
+            self.commands_state[cmd_name]["parameters"][action] = param_vars
+
+            # Click to select this action
+            def select_action(a=action):
+                self.commands_state[cmd_name]["selected_action"].set(a)
+                # Highlight selected column
+                for act, frame in self.commands_state[cmd_name]["action_frames"].items():
+                    frame.config(bg="#e9f7ef" if act == a else "#f7f7f7")
+                    # Also update label bg
+                    for child in frame.winfo_children():
+                        if isinstance(child, tk.Label) and child.cget("text") == act:
+                            child.config(bg=frame["bg"])
+                # Optionally: update parameters if needed
+
+            action_label.bind("<Button-1>", lambda e, a=action: select_action(a))
+            col_frame.bind("<Button-1>", lambda e, a=action: select_action(a))
+
+            self.commands_state[cmd_name]["action_frames"][action] = col_frame
+
+        # Set initial highlight
+        if saved_action in actions:
+            for act, frame in self.commands_state[cmd_name]["action_frames"].items():
+                frame.config(bg="#e9f7ef" if act == saved_action else "#f7f7f7")
+                for child in frame.winfo_children():
+                    if isinstance(child, tk.Label) and child.cget("text") == act:
+                        child.config(bg=frame["bg"])
+
+        # Delay field
+        tk.Label(
+            top_frame, text="Delay (s):", font=("Arial", 8), bg=bg_color
+        ).pack(side="left", padx=(10, 2))
+
+        delay_spinbox = tk.Spinbox(
+            top_frame,
+            from_=0.0,
+            to=100.0,
+            increment=0.1,
+            textvariable=self.commands_state[cmd_name]["delta_time"],
+            width=8,
+            justify="center"
+        )
+        delay_spinbox.pack(side="left", padx=2)
+
+        # Bottom frame for dynamic parameters
+        param_frame = tk.Frame(main_frame, bg=bg_color)
+        param_frame.pack(fill="x", padx=20, pady=(0, 5))
+        self.commands_state[cmd_name]["parameter_frame"] = param_frame
+
+        # If there's a saved action, trigger the action change to populate parameters
+        if saved_action != "Select an option":
+            self.on_action_changed(cmd_name)
+
+    def on_action_changed(self, cmd_name: str):
+        """Handle action dropdown change for composite commands."""
+        cmd_state = self.commands_state[cmd_name]
+        selected_action = cmd_state["selected_action"].get()
+
+        # Clear existing parameter widgets
+        param_frame = cmd_state["parameter_frame"]
+        for widget in param_frame.winfo_children():
+            widget.destroy()
+
+        # Clear parameter state
+        cmd_state["parameters"].clear()
+        cmd_state["parameter_widgets"].clear()
+
+        if selected_action == "Select an option":
+            return  # No parameters to show
+
+        # Get parameter definitions from COMMAND_CONFIGS
+        cmd_config = COMMAND_CONFIGS.get(cmd_name, {})
+        if "actions" not in cmd_config or selected_action not in cmd_config["actions"]:
+            return
+
+        param_defs = cmd_config["actions"][selected_action]["parameters"]
+
+        # Get saved parameter values if available
+        mc = self.state_manager.get_mc(self.selected_mc_mac)
+        saved_params = {}
+        if mc and hasattr(mc, 'last_state'):
+            for param_def in param_defs:
+                param_name = param_def["name"]
+                saved_value = mc.last_state.get(f"{cmd_name}_{param_name}", "")
+                saved_params[param_name] = saved_value
+
+        # Create Entry widgets for each parameter
+        for i, param_def in enumerate(param_defs):
+            param_name = param_def["name"]
+            param_label = param_def["label"]
+
+            # Initialize parameter variable with saved value
+            param_var = tk.StringVar(value=saved_params.get(param_name, ""))
+            cmd_state["parameters"][param_name] = param_var
+
+            # Create label and entry
+            tk.Label(
+                param_frame, text=f"{param_label}:", bg="#f7f7f7", font=("Arial", 8)
+            ).grid(row=i, column=0, sticky="e", padx=5, pady=2)
+
+            entry = tk.Entry(param_frame, textvariable=param_var, width=25)
+            entry.grid(row=i, column=1, sticky="w", padx=5, pady=2)
+
+            cmd_state["parameter_widgets"][param_name] = entry
+
     def toggle_command_state(self, cmd_name: str, state: str):
         """Toggle command state button."""
         if cmd_name not in self.commands_state:
@@ -809,6 +1006,58 @@ class CommandsTab(ttk.Frame):
         if not mc or not hasattr(mc, 'command_configs'):
             return {}
         return mc.command_configs.get(cmd_name, {})
+
+    def build_composite_payload(self, cmd_name: str, action: str, parameters: Dict) -> bytes:
+        """
+        Convert parameter strings to byte payload for composite commands.
+
+        Accepts both decimal (e.g., "255") and hexadecimal (e.g., "0xFF") formats.
+        Converts to bytes in big-endian order.
+
+        Args:
+            cmd_name: Command name (e.g., "X_00_CPU")
+            action: Selected action name
+            parameters: Dict of parameter name -> StringVar
+
+        Returns:
+            bytes: The parameter payload, or None if conversion error
+        """
+        payload = bytearray()
+
+        # Get parameter definitions from COMMAND_CONFIGS
+        cmd_config = COMMAND_CONFIGS.get(cmd_name, {})
+        if "actions" not in cmd_config or action not in cmd_config["actions"]:
+            return None
+
+        param_defs = cmd_config["actions"][action]["parameters"]
+
+        for param_def in param_defs:
+            param_name = param_def["name"]
+            param_value_str = parameters[param_name].get()
+
+            # Skip empty values, default to "0"
+            if not param_value_str:
+                param_value_str = "0"
+
+            try:
+                # Convert string to int (auto-detect hex with 0x prefix or decimal)
+                param_int = int(param_value_str, 0)  # base=0 auto-detects format
+
+                # Convert to bytes
+                if "byte_indices" in param_def:  # Multi-byte field
+                    num_bytes = len(param_def["byte_indices"])
+                    param_bytes = param_int.to_bytes(num_bytes, byteorder='big')
+                else:  # Single-byte field
+                    param_bytes = param_int.to_bytes(1, byteorder='big')
+
+                payload.extend(param_bytes)
+            except (ValueError, OverflowError) as e:
+                # If conversion fails, show error and abort
+                messagebox.showerror("Parameter Error",
+                    f"Invalid value for {param_def['label']}: {param_value_str}\n{str(e)}")
+                return None
+
+        return bytes(payload)
 
     def send_commands(self):
         """Send configured commands to selected MC or cancel sending."""
@@ -835,6 +1084,38 @@ class CommandsTab(ttk.Frame):
             if not cmd_state["enabled"].get():
                 continue  # Skip disabled commands
 
+            # Check if this is a composite command
+            if cmd_state.get("type") == "composite":
+                action = cmd_state["selected_action"].get()
+                if action == "Select an option":
+                    continue  # Skip if no action selected
+
+                # Build parameter bytes
+                parameters = cmd_state["parameters"]
+                param_bytes = self.build_composite_payload(cmd_name, action, parameters)
+
+                if param_bytes is None:
+                    # Error occurred during conversion, already shown to user
+                    continue
+
+                # Get delay in seconds and convert to milliseconds
+                delay_seconds = cmd_state["delta_time"].get()
+                delay_ms = int(delay_seconds * 1000)
+
+                packet = PacketInfo(
+                    mac_source=mc.mac_source,
+                    mac_destiny=mc.mac_destiny,
+                    interface=mc.interface_destiny,
+                    command_byte=b'\x00',  # X_00_CPU appendix
+                    command_name=f"{cmd_name}:{action}",
+                    repetitions=1,  # Composite commands always 1 repetition
+                    delay_ms=delay_ms,
+                    extra_payload=param_bytes  # Additional bytes after appendix
+                )
+                packets.append(packet)
+                continue  # Skip regular command processing
+
+            # Regular commands - existing logic
             state = cmd_state.get("state")
             if not state:
                 continue
@@ -925,22 +1206,39 @@ Interface: {mc.interface_destiny}"""
             mc.last_state = {}
 
         for cmd_name, cmd_state in self.commands_state.items():
-            # Save state
-            state = cmd_state.get("state")
-            if state:
-                mc.last_state[cmd_name] = state
+            # Check if this is a composite command
+            if cmd_state.get("type") == "composite":
+                # Save selected action
+                selected_action = cmd_state["selected_action"].get()
+                mc.last_state[cmd_name] = selected_action
 
-            # Save checkbox enabled state
-            if "enabled" in cmd_state:
+                # Save checkbox enabled state
                 mc.last_state[f"{cmd_name}_enabled"] = cmd_state["enabled"].get()
 
-            # Save repetitions
-            if "repetitions" in cmd_state:
-                mc.last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
-
-            # Save delay
-            if "delta_time" in cmd_state:
+                # Save delay
                 mc.last_state[f"{cmd_name}_delta"] = cmd_state["delta_time"].get()
+
+                # Save all parameter values
+                for param_name, param_var in cmd_state["parameters"].items():
+                    mc.last_state[f"{cmd_name}_{param_name}"] = param_var.get()
+            else:
+                # Regular command - existing logic
+                # Save state
+                state = cmd_state.get("state")
+                if state:
+                    mc.last_state[cmd_name] = state
+
+                # Save checkbox enabled state
+                if "enabled" in cmd_state:
+                    mc.last_state[f"{cmd_name}_enabled"] = cmd_state["enabled"].get()
+
+                # Save repetitions
+                if "repetitions" in cmd_state:
+                    mc.last_state[f"{cmd_name}_reps"] = cmd_state["repetitions"].get()
+
+                # Save delay
+                if "delta_time" in cmd_state:
+                    mc.last_state[f"{cmd_name}_delta"] = cmd_state["delta_time"].get()
 
         # Save to database
         self.state_manager._save_to_db()
